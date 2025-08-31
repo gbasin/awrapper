@@ -10,20 +10,20 @@
 
 ## User Flows
 - Create Run: pick an agent, set params, tap Start.
-- View Run: see status and last N log lines, download full log/artifacts after finish.
+- View Run: see status and last N log lines, ~~download full log/artifacts after finish.
 - Manage: cancel a running job; optionally fork (re-run with tweaks).
 
 ## Scope (What’s In)
 - Predefined agents registry: safe, whitelisted commands + allowed params.
 - Basic run lifecycle: queued → running → finished | failed | canceled | timed_out.
 - Log capture: append stdout/stderr to files; UI shows last ~200 lines with polling.
-- Artifacts: optional file outputs saved and downloadable.
+~~- Artifacts: optional file outputs saved and downloadable.~~
 - Single-user auth (simple token) to protect the UI/API.
 
 ## Architecture (Simple, Single Box)
 - Web App (PWA, mobile-first):
   - Pages: Runs List, New Run, Run Detail (status, log tail, artifacts, cancel).
-  - Polling every ~5s for status/log tail (no WebSockets needed for MVP).
+  - Polling every ~100s for status/log tail (no WebSockets needed for MVP).
 - API Server:
   - REST endpoints to create/list runs, fetch status/logs, cancel, list artifacts.
   - Maintains a lightweight queue; persists run metadata.
@@ -71,9 +71,3 @@
 - Postgres + S3 for durability; role-based access; multi-user.
 - Structured events; richer viewers; optional WebSocket streaming.
 - Agent templates editable in UI.
-
-## Open Questions
-- Which 2–3 agents are first (names/commands/params)?
-- SQLite vs Postgres for the initial deploy?
-- Log retention policy (days/size) for the VM disk?
-
