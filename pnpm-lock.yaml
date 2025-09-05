@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@fastify/formbody':
+        specifier: ^8.0.0
+        version: 8.0.2
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
@@ -433,6 +436,9 @@ packages:
 
   '@fastify/fast-json-stringify-compiler@4.3.0':
     resolution: {integrity: sha512-aZAXGYo6m22Fk1zZzEUKBvut/CIIQe/BapEORnxiD5Qr0kPHqqI69NtEMCme74h+at72sPhbkb4ZrLd1W3KRLA==}
+
+  '@fastify/formbody@8.0.2':
+    resolution: {integrity: sha512-84v5J2KrkXzjgBpYnaNRPqwgMsmY7ZDjuj0YVuMR3NXCJRCgKEZy/taSP1wUYGn0onfxJpLyRGDLa+NMaDJtnA==}
 
   '@fastify/merge-json-schemas@0.1.1':
     resolution: {integrity: sha512-fERDVz7topgNjtXsJTTW1JKLy0rhuLRcquYqNR9rF7OcVpCa2OVW49ZPDIhaRRCaUuvVxI+N416xUoF76HNSXA==}
@@ -947,6 +953,9 @@ packages:
 
   fast-uri@3.1.0:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
+
+  fastify-plugin@5.0.1:
+    resolution: {integrity: sha512-HCxs+YnRaWzCl+cWRYFnHmeRFyR5GVnJTAaCJQiYzQSDwK9MgJdyAsuL3nh0EWRCYMgQ5MeziymvmAhUHYHDUQ==}
 
   fastify-type-provider-zod@2.1.0:
     resolution: {integrity: sha512-p0plQyrxVR1IxJaOVbKRkduYh74HAS6Pm2szhFrc/vFdfIEu8UWo/cPFZCrcKyeo8ICjWbHH1zkx8lWw/ivpqg==}
@@ -1907,6 +1916,11 @@ snapshots:
     dependencies:
       fast-json-stringify: 5.16.1
 
+  '@fastify/formbody@8.0.2':
+    dependencies:
+      fast-querystring: 1.1.2
+      fastify-plugin: 5.0.1
+
   '@fastify/merge-json-schemas@0.1.1':
     dependencies:
       fast-deep-equal: 3.1.3
@@ -2442,6 +2456,8 @@ snapshots:
   fast-uri@2.4.0: {}
 
   fast-uri@3.1.0: {}
+
+  fastify-plugin@5.0.1: {}
 
   fastify-type-provider-zod@2.1.0(fastify@4.29.1)(zod@3.25.76):
     dependencies:

@@ -1,7 +1,10 @@
 import Fastify from 'fastify';
+import formbody from '@fastify/formbody';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { layout, escapeHtml } from './ui.js';
+import os from 'node:os';
+import path from 'node:path';
 import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
@@ -12,6 +15,8 @@ import { CodexProtoSession } from './proto.js';
 
 export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({ logger: { transport: { target: 'pino-pretty' } } }).withTypeProvider<ZodTypeProvider>();
+  // Enable parsing of application/x-www-form-urlencoded for HTML forms
+  await app.register(formbody);
 
   app.get('/', async (_req, reply) => {
     const db = getDb();
@@ -27,13 +32,27 @@ export async function buildServer(opts?: { listen?: boolean }) {
         </tr>`
       )
       .join('');
+    // Build a datalist of recent repo paths for quick selection
+    const seen = new Set<string>();
+    const recentRepos = sessions
+      .map((s) => s.repo_path as string)
+      .filter((p) => {
+        if (!p || seen.has(p)) return false;
+        seen.add(p);
+        return true;
+      })
+      .slice(0, 10);
+
     const page = layout(
       'awrapper',
       `
       <h1>Sessions</h1>
       <form method="post" action="/sessions" style="margin-bottom: 16px">
         <div class="row">
-          <input name="repo_path" placeholder="/path/to/repo" size="40" required />
+          <input id="repo_path" name="repo_path" list="recent-repos" placeholder="/path/to/repo" size="40" required />
+          <datalist id="recent-repos">
+            ${recentRepos.map((p) => `<option value="${escapeHtml(p)}"></option>`).join('')}
+          </datalist>
           <input name="branch" placeholder="branch (optional)" />
           <select name="lifecycle">
             <option value="persistent" selected>persistent (default)</option>
@@ -51,6 +70,21 @@ export async function buildServer(opts?: { listen?: boolean }) {
         <tr><th>id</th><th>agent</th><th>lifecycle</th><th>status</th><th>repo</th></tr>
         ${rows}
       </table>
+      <script>
+        // Persist the last used repo path locally for convenience
+        (function() {
+          try {
+            var input = document.getElementById('repo_path');
+            if (!input) return;
+            var KEY = 'awrapper:lastRepoPath';
+            var saved = localStorage.getItem(KEY);
+            if (saved && !input.value) input.value = saved;
+            input.addEventListener('change', function() { localStorage.setItem(KEY, input.value); });
+            var form = input.closest('form');
+            if (form) form.addEventListener('submit', function() { localStorage.setItem(KEY, input.value); });
+          } catch (_) {}
+        })();
+      </script>
       `
     );
     reply.type('text/html').send(page);
@@ -59,7 +93,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
   app.post('/sessions', async (req, reply) => {
     const body = (req.body as any) || {};
     const agent_id = body.agent_id || 'codex';
-    const repo_path = body.repo_path as string;
+    const repo_path = expandPath(body.repo_path as string);
     const branch = body.branch as string | undefined;
     const lifecycle: 'oneshot' | 'persistent' = body.lifecycle || 'persistent';
     const initial_message = body.initial_message as string | undefined;
@@ -118,6 +152,10 @@ export async function buildServer(opts?: { listen?: boolean }) {
       });
     }
 
+    const ctype = String(req.headers['content-type'] || '');
+    if (ctype.includes('application/x-www-form-urlencoded')) {
+      return reply.redirect(303, `/sessions/${id}`);
+    }
     reply.send({ id, worktree_path });
   });
 
@@ -270,4 +308,13 @@ async function tailFile(filePath: string, n: number): Promise<string> {
   } catch {
     return '';
   }
+}
+
+function expandPath(p: string | undefined): string {
+  if (!p) return '';
+  if (p.startsWith('~/') || p === '~') {
+    const suffix = p.slice(1); // remove leading '~'
+    return path.join(os.homedir(), suffix);
+  }
+  return p;
 }
