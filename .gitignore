@@ -154,3 +154,6 @@ vite.config.ts.timestamp-*
 .turbo/
 # In case node_modules is not ignored in some setups
 node_modules/.cache/turbo/
+
+# awrapper local worktrees (tool-generated, safe to ignore)
+.awrapper-worktrees/
