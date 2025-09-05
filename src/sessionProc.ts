@@ -29,8 +29,8 @@ export async function spawnOneshotCodex({
   const lastMsgPath = path.join(artifactDir, 'last-message.txt');
 
   const codexBin = process.env.CODEX_BIN || 'codex';
-  const args = ['exec', '--json', '-C', worktree, '--output-last-message', lastMsgPath, prompt];
-  const proc = execa(codexBin, args, { all: true });
+  const args = ['exec', '--json', '--output-last-message', lastMsgPath, prompt];
+  const proc = execa(codexBin, args, { all: true, cwd: worktree });
 
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);
@@ -49,8 +49,8 @@ export async function spawnPersistentCodex({
 
   // NOTE: Protocol specifics TBD; we currently just start the process and pipe logs.
   const codexBin = process.env.CODEX_BIN || 'codex';
-  const args = ['-a=never', 'proto', '-C', worktree];
-  const proc = execa(codexBin, args, { all: true });
+  const args = ['-a=never', 'proto'];
+  const proc = execa(codexBin, args, { all: true, cwd: worktree });
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);
   return { proc, logPath, artifactDir };
