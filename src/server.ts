@@ -9,7 +9,7 @@ import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 
@@ -53,12 +53,14 @@ export async function buildServer(opts?: { listen?: boolean }) {
           <datalist id="recent-repos">
             ${recentRepos.map((p) => `<option value="${escapeHtml(p)}"></option>`).join('')}
           </datalist>
+          <button type="button" id="browseBtn">Browse…</button>
           <input name="branch" placeholder="branch (optional)" />
           <select name="lifecycle">
             <option value="persistent" selected>persistent (default)</option>
             <option value="oneshot">oneshot</option>
           </select>
         </div>
+        <div id="browser" class="mono" style="display:none; border: 1px solid #eee; padding: 8px; margin-top: 8px; border-radius: 6px; max-height: 320px; overflow: auto;"></div>
         <div style="margin-top:8px">
           <textarea name="initial_message" placeholder="Initial message (optional)"></textarea>
         </div>
@@ -84,10 +86,147 @@ export async function buildServer(opts?: { listen?: boolean }) {
             if (form) form.addEventListener('submit', function() { localStorage.setItem(KEY, input.value); });
           } catch (_) {}
         })();
+
+        // Simple server-driven directory browser
+        (function() {
+          var btn = document.getElementById('browseBtn');
+          var box = document.getElementById('browser');
+          var input = document.getElementById('repo_path');
+          if (!btn || !box || !input) return;
+          var currentPath = null;
+
+          function escapeHtml(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
+          }
+
+          function renderRoots(data) {
+            var html = '<div style="display:flex; justify-content: space-between; align-items: center">'
+              + '<b>Select a directory</b>'
+              + '<button type="button" id="closeBrowser">Close</button>'
+              + '</div>';
+            html += '<div style="margin-top:6px">Roots:</div><ul>';
+            for (var i=0;i<data.roots.length;i++) {
+              var r = data.roots[i];
+              html += '<li><a href="#" data-path="' + encodeURIComponent(r.path) + '" class="nav">' + escapeHtml(r.label || r.path) + '</a></li>';
+            }
+            html += '</ul>';
+            box.innerHTML = html;
+            wireEvents();
+          }
+
+          function renderListing(data) {
+            var html = '<div style="display:flex; justify-content: space-between; align-items: center">'
+              + '<div>Path: <span class="muted">' + escapeHtml(data.path) + '</span></div>'
+              + '<div>'
+              + '<button type="button" id="selectHere">Use this directory</button> '
+              + '<button type="button" id="closeBrowser">Close</button>'
+              + '</div>'
+              + '</div>';
+            html += '<div style="margin-top:6px">';
+            if (data.parent) {
+              html += '<a href="#" data-path="' + encodeURIComponent(data.parent) + '" class="nav">↑ Up</a>';
+            } else {
+              html += '<a href="#" class="nav-roots">Roots</a>';
+            }
+            html += '</div>';
+            html += '<ul style="margin-top:6px">';
+            for (var i=0;i<data.entries.length;i++) {
+              var e = data.entries[i];
+              var label = e.name + (e.is_repo ? ' • git' : '');
+              html += '<li><a href="#" data-path="' + encodeURIComponent(e.path) + '" class="nav">' + escapeHtml(label) + '</a>'
+                + ' <button type="button" class="sel" data-path="' + encodeURIComponent(e.path) + '">Select</button>'
+                + '</li>';
+            }
+            html += '</ul>';
+            box.innerHTML = html;
+            wireEvents();
+            var selHere = document.getElementById('selectHere');
+            if (selHere) selHere.addEventListener('click', function() { input.value = data.path; box.style.display='none'; });
+          }
+
+          async function load(path) {
+            var url = '/browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+            var res = await fetch(url);
+            var data = await res.json();
+            if (data.roots) renderRoots(data); else renderListing(data);
+          }
+
+          function wireEvents() {
+            var close = document.getElementById('closeBrowser');
+            if (close) close.addEventListener('click', function(){ box.style.display='none'; });
+            var navs = box.querySelectorAll('a.nav');
+            for (var i=0;i<navs.length;i++) {
+              navs[i].addEventListener('click', function(ev){ ev.preventDefault(); var p = this.getAttribute('data-path'); if(p) load(decodeURIComponent(p)); });
+            }
+            var roots = box.querySelectorAll('a.nav-roots');
+            for (var i=0;i<roots.length;i++) {
+              roots[i].addEventListener('click', function(ev){ ev.preventDefault(); load(null); });
+            }
+            var sels = box.querySelectorAll('button.sel');
+            for (var i=0;i<sels.length;i++) {
+              sels[i].addEventListener('click', function(){ var p = this.getAttribute('data-path'); if (p) { input.value = decodeURIComponent(p); box.style.display='none'; } });
+            }
+          }
+
+          btn.addEventListener('click', function(){ box.style.display = (box.style.display === 'none' ? 'block' : 'none'); if (box.style.display === 'block') load(null); });
+        })();
       </script>
       `
     );
     reply.type('text/html').send(page);
+  });
+
+  // Directory browsing API for server-side picker
+  app.get('/browse', async (req, reply) => {
+    const q = (req.query as any) || {};
+    const reqPath = expandPath(q.path as string | undefined);
+
+    function isUnderRoot(p: string) {
+      const rp = path.resolve(p);
+      return BROWSE_ROOTS.some((root) => {
+        const rel = path.relative(root, rp);
+        return !rel.startsWith('..') && !path.isAbsolute(rel);
+      });
+    }
+
+    function parentDir(p: string) {
+      const d = path.dirname(p);
+      if (d === p) return undefined;
+      if (isUnderRoot(d)) return d;
+      return undefined;
+    }
+
+    if (!reqPath) {
+      // Return allowed roots
+      return reply.send({ roots: BROWSE_ROOTS.map((p) => ({ path: p, label: p === os.homedir() ? 'Home' : p })) });
+    }
+
+    // Guard: only allow paths within allowed roots
+    if (!isUnderRoot(reqPath)) {
+      return reply.code(400).send({ error: 'Path not allowed' });
+    }
+
+    let entries: any[] = [];
+    try {
+      const dirents = await fs.readdir(reqPath, { withFileTypes: true });
+      const dirs = dirents.filter((d) => d.isDirectory());
+      entries = await Promise.all(
+        dirs.map(async (d) => {
+          const p = path.join(reqPath, d.name);
+          let isRepo = false;
+          try {
+            // Lightweight check: presence of .git dir or file
+            const gitPath = path.join(p, '.git');
+            isRepo = await fs.pathExists(gitPath);
+          } catch {}
+          return { name: d.name, path: p, is_dir: true, is_repo: isRepo };
+        })
+      );
+    } catch (err: any) {
+      return reply.code(400).send({ error: String(err?.message || err) });
+    }
+
+    reply.send({ path: path.resolve(reqPath), parent: parentDir(reqPath), entries });
   });
 
   app.post('/sessions', async (req, reply) => {

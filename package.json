@@ -15,7 +15,7 @@
     "ci": "turbo run test"
   },
   "dependencies": {
-    "@fastify/formbody": "^8.0.0",
+    "@fastify/formbody": "^7.0.0",
     "better-sqlite3": "^11.10.0",
     "execa": "^9.3.0",
     "fastify": "^4.28.1",
