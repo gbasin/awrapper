@@ -9,11 +9,11 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage",
+    "test": "pnpm install && vitest run --coverage",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^11.10.0",
     "execa": "^9.3.0",
     "fastify": "^4.28.1",
     "fastify-type-provider-zod": "^2.0.0",
