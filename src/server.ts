@@ -12,11 +12,20 @@ import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
 import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
+import { ensureAgentsRegistry } from './agents.js';
 
 export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({ logger: { transport: { target: 'pino-pretty' } } }).withTypeProvider<ZodTypeProvider>();
   // Enable parsing of application/x-www-form-urlencoded for HTML forms
   await app.register(formbody);
+
+  // Ensure DB and default agents are initialized when server is built directly (e.g., in tests)
+  try {
+    getDb();
+    ensureAgentsRegistry();
+  } catch (_) {
+    // Best-effort; routes will still work without crashing if init fails
+  }
 
   app.get('/', async (_req, reply) => {
     const db = getDb();
@@ -347,22 +356,23 @@ export async function buildServer(opts?: { listen?: boolean }) {
         <script>
           const id = ${JSON.stringify(id)};
           async function poll() {
-            const res = await fetch('/sessions/' + id);
+            // Explicitly request JSON to avoid content-negotiation returning HTML
+            const res = await fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } });
             const data = await res.json();
-            const msgsRes = await fetch('/sessions/' + id + '/messages?after=');
+            const msgsRes = await fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } });
             const msgs = await msgsRes.json();
             document.getElementById('msgs').textContent = msgs.map(m => '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content).join('\n');
             const logRes = await fetch('/sessions/' + id + '/log?tail=500');
             document.getElementById('log').textContent = await logRes.text();
           }
-          setInterval(poll, 250);
-          poll();
+          setInterval(() => { poll().catch(() => {}); }, 250);
+          poll().catch(() => {});
 
           document.getElementById('msgform').addEventListener('submit', async (e) => {
             e.preventDefault();
             const content = document.getElementById('msg').value;
             if (!content.trim()) return;
-            await fetch('/sessions/' + id + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+            await fetch('/sessions/' + id + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ content }) });
             document.getElementById('msg').value='';
           });
         </script>
@@ -446,7 +456,19 @@ export async function buildServer(opts?: { listen?: boolean }) {
   });
 
   if (opts?.listen !== false) {
-    await app.listen({ host: DEFAULT_BIND, port: DEFAULT_PORT });
+    try {
+      const url = await app.listen({ host: DEFAULT_BIND, port: DEFAULT_PORT });
+      app.log.info({ url }, 'Server listening');
+    } catch (err: any) {
+      // If default port is busy, fall back to an ephemeral port (0)
+      if (err && err.code === 'EADDRINUSE') {
+        app.log.warn({ port: DEFAULT_PORT }, 'Port in use; falling back to a random free port');
+        const url = await app.listen({ host: DEFAULT_BIND, port: 0 });
+        app.log.info({ url }, 'Server listening');
+      } else {
+        throw err;
+      }
+    }
   }
   return app;
 }
