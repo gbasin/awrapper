@@ -11,6 +11,12 @@ Quickstart
 - Tests: `pnpm test`
 - Open: `http://127.0.0.1:8787`
 
+Turbo
+
+- Orchestrate via Turbo: `pnpm turbo run build`, `pnpm turbo run test`, or `pnpm run ci`.
+- Underlying scripts remain (`dev`, `build`, `test`), so `turbo run <task>` executes those without recursion. `ci` runs `test`, which depends on `build`.
+- Remote caching is off by default. Configure `turbo` for remote cache if desired.
+
 Notes
 
 - Default lifecycle is `persistent`; multi-turn messaging is implemented via `codex proto` with a simple JSONL protocol. One in-flight user turn per session is enforced.

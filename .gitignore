@@ -149,3 +149,8 @@ vite.config.ts.timestamp-*
 !.vscode/launch.json
 !.vscode/extensions.json
 .idea/
+
+# Turborepo cache
+.turbo/
+# In case node_modules is not ignored in some setups
+node_modules/.cache/turbo/
