@@ -94,6 +94,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
           var input = document.getElementById('repo_path');
           if (!btn || !box || !input) return;
           var currentPath = null;
+          var currentData = null; // last payload from /browse
+          var onlyGit = (function(){ try { return localStorage.getItem('awrapper:browseOnlyGit') !== '0'; } catch(_) { return true; } })();
 
           function escapeHtml(s) {
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
@@ -115,9 +117,12 @@ export async function buildServer(opts?: { listen?: boolean }) {
           }
 
           function renderListing(data) {
+            currentPath = data.path || null;
+            currentData = data;
             var html = '<div style="display:flex; justify-content: space-between; align-items: center">'
               + '<div>Path: <span class="muted">' + escapeHtml(data.path) + '</span></div>'
               + '<div>'
+              + '<label style="margin-right:8px; font-weight:normal"><input type="checkbox" id="onlyGitToggle" ' + (onlyGit ? 'checked' : '') + '> Only Git repos</label>'
               + '<button type="button" id="selectHere">Use this directory</button> '
               + '<button type="button" id="closeBrowser">Close</button>'
               + '</div>'
@@ -129,26 +134,33 @@ export async function buildServer(opts?: { listen?: boolean }) {
               html += '<a href="#" class="nav-roots">Roots</a>';
             }
             html += '</div>';
+            var entries = data.entries || [];
+            if (onlyGit) entries = entries.filter(function(e){ return !!e.is_repo; });
             html += '<ul style="margin-top:6px">';
-            for (var i=0;i<data.entries.length;i++) {
-              var e = data.entries[i];
+            for (var i=0;i<entries.length;i++) {
+              var e = entries[i];
               var label = e.name + (e.is_repo ? ' • git' : '');
               html += '<li><a href="#" data-path="' + encodeURIComponent(e.path) + '" class="nav">' + escapeHtml(label) + '</a>'
                 + ' <button type="button" class="sel" data-path="' + encodeURIComponent(e.path) + '">Select</button>'
                 + '</li>';
             }
             html += '</ul>';
+            if (entries.length === 0) {
+              html += '<div class="muted">No git repos here.</div>';
+            }
             box.innerHTML = html;
             wireEvents();
             var selHere = document.getElementById('selectHere');
             if (selHere) selHere.addEventListener('click', function() { input.value = data.path; box.style.display='none'; });
+            var tog = document.getElementById('onlyGitToggle');
+            if (tog) tog.addEventListener('change', function(){ onlyGit = this.checked; try { localStorage.setItem('awrapper:browseOnlyGit', onlyGit ? '1' : '0'); } catch(_){}; renderListing(currentData); });
           }
 
           async function load(path) {
             var url = '/browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
             var res = await fetch(url);
             var data = await res.json();
-            if (data.roots) renderRoots(data); else renderListing(data);
+            if (data.roots) { currentData = data; renderRoots(data); } else { renderListing(data); }
           }
 
           function wireEvents() {
