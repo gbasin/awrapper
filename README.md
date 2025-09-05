@@ -5,11 +5,13 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 Quickstart
 
 - Prereqs: Node.js 20+, Git, Codex CLI installed (`brew install codex` or `npm i -g @openai/codex`).
-- Install: `npm install`
-- Run dev: `npm run dev`
+- Use pnpm: `pnpm install`
+- Run dev: `pnpm dev`
+- Build: `pnpm build`
+- Tests: `pnpm test`
 - Open: `http://127.0.0.1:8787`
 
 Notes
 
-- Default lifecycle is `persistent`, but messaging for persistent sessions via `codex proto` is not wired yet in this scaffold. Use `oneshot` to exercise `codex exec --json` end-to-end.
+- Default lifecycle is `persistent`; multi-turn messaging is implemented via `codex proto` with a simple JSONL protocol. One in-flight user turn per session is enforced.
 - Data lives under `~/.awrapper` (DB, logs, artifacts). Worktrees are created under `<repo>/.awrapper-worktrees/<session_id>` and are not auto-cleaned.

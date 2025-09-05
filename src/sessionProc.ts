@@ -1,10 +1,10 @@
-import { execa, ExecaChildProcess } from 'execa';
+import { execa, type Subprocess } from 'execa';
 import fs from 'fs-extra';
 import path from 'node:path';
 import { ARTIFACTS_DIR, LOGS_DIR } from './config.js';
 
 export type SpawnResult = {
-  proc: ExecaChildProcess | null;
+  proc: Subprocess | null;
   logPath: string;
   artifactDir: string;
 };
@@ -28,8 +28,9 @@ export async function spawnOneshotCodex({
   const { logPath, artifactDir } = await setupPaths(id);
   const lastMsgPath = path.join(artifactDir, 'last-message.txt');
 
+  const codexBin = process.env.CODEX_BIN || 'codex';
   const args = ['exec', '--json', '-C', worktree, '--output-last-message', lastMsgPath, prompt];
-  const proc = execa('codex', args, { all: true });
+  const proc = execa(codexBin, args, { all: true });
 
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);
@@ -47,10 +48,10 @@ export async function spawnPersistentCodex({
   const { logPath, artifactDir } = await setupPaths(id);
 
   // NOTE: Protocol specifics TBD; we currently just start the process and pipe logs.
-  const args = ['proto', '-C', worktree];
-  const proc = execa('codex', args, { all: true });
+  const codexBin = process.env.CODEX_BIN || 'codex';
+  const args = ['-a=never', 'proto', '-C', worktree];
+  const proc = execa(codexBin, args, { all: true });
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);
   return { proc, logPath, artifactDir };
 }
-

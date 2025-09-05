@@ -4,12 +4,13 @@ import { z } from 'zod';
 import { layout, escapeHtml } from './ui.js';
 import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
-import { acquireLock, procs, releaseLock } from './state.js';
+import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
 import { DEFAULT_BIND, DEFAULT_PORT } from './config.js';
 import fs from 'fs-extra';
+import { CodexProtoSession } from './proto.js';
 
-export async function buildServer() {
+export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({ logger: { transport: { target: 'pino-pretty' } } }).withTypeProvider<ZodTypeProvider>();
 
   app.get('/', async (_req, reply) => {
@@ -55,19 +56,13 @@ export async function buildServer() {
     reply.type('text/html').send(page);
   });
 
-  app.post('/sessions', {
-    schema: {
-      body: z.object({
-        agent_id: z.string().default('codex'),
-        repo_path: z.string(),
-        branch: z.string().optional(),
-        lifecycle: z.enum(['oneshot', 'persistent']).default('persistent'),
-        params: z.record(z.any()).optional(),
-        initial_message: z.string().optional()
-      })
-    }
-  }, async (req, reply) => {
-    const { agent_id, repo_path, branch, lifecycle, initial_message } = req.body as any;
+  app.post('/sessions', async (req, reply) => {
+    const body = (req.body as any) || {};
+    const agent_id = body.agent_id || 'codex';
+    const repo_path = body.repo_path as string;
+    const branch = body.branch as string | undefined;
+    const lifecycle: 'oneshot' | 'persistent' = body.lifecycle || 'persistent';
+    const initial_message = body.initial_message as string | undefined;
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
     if (!(await isGitRepo(repo_path))) return reply.code(400).send({ error: 'repo_path is not a Git repo' });
     const db = getDb();
@@ -88,7 +83,7 @@ export async function buildServer() {
       db.prepare('update sessions set status = ? where id = ?').run('running', id);
       const { proc } = await spawnOneshotCodex({ worktree: worktree_path, prompt });
       procs.set(id, proc!);
-      proc!.once('exit', async (code) => {
+      proc!.once('exit', async (code: number | null) => {
         const db2 = getDb();
         db2.prepare('update sessions set status = ?, exit_code = ?, closed_at = ?, pid = NULL where id = ?')
           .run('closed', code ?? null, Date.now(), id);
@@ -110,11 +105,16 @@ export async function buildServer() {
       const { proc } = await spawnPersistentCodex({ worktree: worktree_path });
       db.prepare('update sessions set status = ?, pid = ? where id = ?').run('running', proc!.pid, id);
       procs.set(id, proc!);
-      proc!.once('exit', (code) => {
+      // Attach proto session handler
+      const proto = new CodexProtoSession(proc!);
+      protoSessions.set(id, proto);
+      try { await proto.configureSession(worktree_path); } catch {}
+      proc!.once('exit', (code: number | null) => {
         const db3 = getDb();
         db3.prepare('update sessions set status = ?, exit_code = ?, closed_at = ?, pid = NULL where id = ?')
           .run('closed', code ?? null, Date.now(), id);
         procs.delete(id);
+        protoSessions.delete(id);
       });
     }
 
@@ -195,9 +195,7 @@ export async function buildServer() {
     reply.send(rows);
   });
 
-  app.post('/sessions/:id/messages', {
-    schema: { body: z.object({ content: z.string().min(1) }) }
-  }, async (req, reply) => {
+  app.post('/sessions/:id/messages', async (req, reply) => {
     const { id } = req.params as any;
     const { content } = req.body as any;
     const db = getDb();
@@ -206,8 +204,27 @@ export async function buildServer() {
     if (s.lifecycle !== 'persistent') return reply.code(400).send({ error: 'messages only valid for persistent sessions' });
     if (!acquireLock(id)) return reply.code(409).send({ error: 'turn in flight' });
     try {
-      // TODO: wire codex proto protocol. For now, return 501 to make behavior explicit.
-      return reply.code(501).send({ error: 'persistent messaging via codex proto not implemented yet' });
+      const proto = protoSessions.get(id);
+      if (!proto) return reply.code(503).send({ error: 'session process not available' });
+      // Persist user message
+      const turnId = crypto.randomUUID();
+      const now = Date.now();
+      const userMsgId = crypto.randomUUID();
+      db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+        .run(userMsgId, id, turnId, 'user', content, now);
+      db.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
+
+      const runId = proto.sendUserInput(content, turnId);
+      let assistantContent = '';
+      try {
+        assistantContent = await proto.awaitTaskComplete(runId, 120_000);
+      } catch (err: any) {
+        assistantContent = `Error: ${String(err?.message || err)}`;
+      }
+      const asstMsgId = crypto.randomUUID();
+      db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+        .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+      return reply.send({ turn_id: turnId, user_message_id: userMsgId, assistant_message_id: asstMsgId });
     } finally {
       releaseLock(id);
     }
@@ -232,14 +249,16 @@ export async function buildServer() {
     const p = procs.get(id);
     const db = getDb();
     if (p) {
-      try { p.kill('SIGTERM', { forceKillAfterTimeout: 2000 }); } catch {}
+      try { p.kill('SIGTERM'); } catch {}
       procs.delete(id);
       db.prepare('update sessions set status = ?, closed_at = ? where id = ?').run('canceled', Date.now(), id);
     }
     reply.redirect(`/sessions/${id}`);
   });
 
-  await app.listen({ host: DEFAULT_BIND, port: DEFAULT_PORT });
+  if (opts?.listen !== false) {
+    await app.listen({ host: DEFAULT_BIND, port: DEFAULT_PORT });
+  }
   return app;
 }
 
@@ -252,4 +271,3 @@ async function tailFile(filePath: string, n: number): Promise<string> {
     return '';
   }
 }
-
