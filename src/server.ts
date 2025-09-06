@@ -394,6 +394,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
         </div>
         <h3>Transcript</h3>
         <div id="msgs" class="mono"></div>
+        <h3>Agent Trace</h3>
+        <div id="trace" class="mono" style="border:1px solid #eee; padding:8px; border-radius:6px"></div>
         <h3>Log</h3>
         <div id="log" class="log mono"></div>
         <script>
@@ -403,15 +405,104 @@ export async function buildServer(opts?: { listen?: boolean }) {
             function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
             function assign(t, s){ if(!s) return t; for (var k in s){ if(Object.prototype.hasOwnProperty.call(s,k)) t[k]=s[k]; } return t; }
           function dbgPost(evt, extra){ if(!DEBUG) return; try{ var payload = assign({ evt: evt, id: id, t: Date.now() }, extra || {}); navigator.sendBeacon('/client-log', JSON.stringify(payload)); } catch(_){} }
+          function escapeHtml(s){ return String(s==null? '': s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
+          function parseProtoEvents(text){
+            var events = [];
+            if (!text) return events;
+            var lines = text.split(/\r?\n/);
+            for (var i=0;i<lines.length;i++){
+              var line = lines[i].trim();
+              if (!line) continue;
+              // Fast path: JSON lines usually start with '{'
+              if (line[0] !== '{') continue;
+              try {
+                var obj = JSON.parse(line);
+                if (obj && typeof obj === 'object' && obj.msg && typeof obj.msg.type === 'string') {
+                  events.push({ id: obj.id || '', type: obj.msg.type, msg: obj.msg, raw: obj });
+                }
+              } catch(_) { /* ignore non-JSON */ }
+            }
+            return events;
+          }
+          function summarizeEvents(events){
+            // Group by run id (last task_started is considered active)
+            var lastRunId = null;
+            for (var i=events.length-1;i>=0;i--){ if (events[i].type === 'task_started') { lastRunId = events[i].id; break; } }
+            // Fallback: use last event id if no task_started present
+            if (!lastRunId && events.length) lastRunId = events[events.length-1].id;
+            var active = lastRunId ? events.filter(function(e){ return e.id === lastRunId; }) : [];
+            var reasoning = [];
+            var message = '';
+            var tokens = null;
+            var others = [];
+            for (var i=0;i<active.length;i++){
+              var e = active[i];
+              if (e.type === 'agent_reasoning_delta') {
+                reasoning.push(String(e.msg.delta || ''));
+              } else if (e.type === 'agent_reasoning') {
+                // Full text snapshot; prefer it over accumulated deltas
+                reasoning = [String(e.msg.text || '')];
+              } else if (e.type === 'agent_message_delta') {
+                message += String(e.msg.delta || '');
+              } else if (e.type === 'agent_message') {
+                message = String(e.msg.message || '');
+              } else if (e.type === 'token_count') {
+                tokens = { input: e.msg.input_tokens, output: e.msg.output_tokens, total: e.msg.total_tokens };
+              } else {
+                others.push(e);
+              }
+            }
+            return { runId: lastRunId || '', events: active, reasoning: reasoning.join(''), message: message, tokens: tokens, others: others };
+          }
+          function renderTrace(section, info){
+            if (!section) return;
+            if (!info || !info.runId) { section.innerHTML = '<div class="muted">No recent agent events.</div>'; return; }
+            var parts = [];
+            var title = 'Agent trace for run ' + escapeHtml(info.runId) + ' (' + info.events.length + ' events)';
+            parts.push('<details><summary>' + title + '</summary>');
+            if (info.tokens) {
+              parts.push('<div>Tokens: input ' + escapeHtml(info.tokens.input) + ', output ' + escapeHtml(info.tokens.output) + ', total ' + escapeHtml(info.tokens.total) + '</div>');
+            }
+            if (info.reasoning && info.reasoning.trim()) {
+              var r = info.reasoning;
+              var preview = r.length > 220 ? r.slice(0,220) + '…' : r;
+              parts.push('<details style="margin-top:6px"><summary>Reasoning (' + r.length + ' chars)</summary><pre style="white-space:pre-wrap">' + escapeHtml(r) + '</pre></details>');
+            }
+            if (info.message && info.message.trim()) {
+              var m = info.message;
+              parts.push('<details style="margin-top:6px"><summary>Assistant Message (' + m.length + ' chars)</summary><pre style="white-space:pre-wrap">' + escapeHtml(m) + '</pre></details>');
+            }
+            if (info.others && info.others.length){
+              parts.push('<details style="margin-top:6px"><summary>Other Events (' + info.others.length + ')</summary>');
+              for (var i=0;i<info.others.length;i++){
+                var e = info.others[i];
+                var label = '[' + escapeHtml(e.type) + ']';
+                // Include short payload preview for common fields
+                var extra = '';
+                if (typeof e.msg.message === 'string') extra = ' ' + escapeHtml((e.msg.message || '').slice(0,200));
+                if (e.msg && (e.msg.tool || e.msg.tool_name)) extra += ' tool=' + escapeHtml(e.msg.tool || e.msg.tool_name);
+                if (Array.isArray(e.msg.command)) extra += ' command=' + escapeHtml(e.msg.command.join(' ')).slice(0,200);
+                parts.push('<div>' + label + extra + '</div>');
+              }
+              parts.push('</details>');
+            }
+            if (info.events && info.events.length){
+              // Raw JSON for power users
+              var raw = info.events.map(function(e){ try { return JSON.stringify(e.raw); } catch(_) { return ''; } }).filter(Boolean).join('\n');
+              parts.push('<details style="margin-top:6px"><summary>Raw Events JSON (' + info.events.length + ')</summary><pre style="white-space:pre-wrap">' + escapeHtml(raw) + '</pre></details>');
+            }
+            parts.push('</details>');
+            section.innerHTML = parts.join('');
+          }
           function poll(){
             dbg('poll: start');
             return fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
               .then(function(res){ return res.json(); })
               .then(function(data){ dbg('poll: session ok', data && data.id); return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } }); })
               .then(function(res){ return res.json(); })
-              .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=500'); })
+              .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=800'); })
               .then(function(res){ return res.text(); })
-              .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; dbg('poll: done'); })
+              .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; try { var evs = parseProtoEvents(logText); var info = summarizeEvents(evs); renderTrace(document.getElementById('trace'), info); } catch(e) { dbg('trace parse error', e && e.message); } dbg('poll: done'); })
               .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
           }
           setInterval(function(){ poll(); }, 1000);
@@ -457,8 +548,35 @@ export async function buildServer(opts?: { listen?: boolean }) {
     if (s.lifecycle !== 'persistent') return reply.code(400).send({ error: 'messages only valid for persistent sessions' });
     if (!acquireLock(id)) return reply.code(409).send({ error: 'turn in flight' });
     try {
-      const proto = protoSessions.get(id);
-      if (!proto) return reply.code(503).send({ error: 'session process not available' });
+      let proto = protoSessions.get(id);
+      // If the in-memory proto session is missing (e.g., server restart), try to revive it lazily
+      if (!proto) {
+        try {
+          (req as any).log.info({ id }, 'Reviving persistent agent process for session');
+          // Mark as starting then spawn a fresh persistent Codex process
+          db.prepare('update sessions set status = ? where id = ?').run('starting', id);
+          const { proc } = await spawnPersistentCodex({ worktree: s.worktree_path });
+          db.prepare('update sessions set status = ?, pid = ? where id = ?').run('running', proc!.pid, id);
+          procs.set(id, proc!);
+          const revived = new CodexProtoSession(proc!);
+          protoSessions.set(id, revived);
+          if (PROTO_TRY_CONFIGURE) {
+            try { await revived.configureSession(s.worktree_path); } catch {}
+          }
+          // Re-attach exit handler to keep DB and in-memory maps consistent
+          proc!.once('exit', (code: number | null) => {
+            const db3 = getDb();
+            db3.prepare('update sessions set status = ?, exit_code = ?, closed_at = ?, pid = NULL where id = ?')
+              .run('closed', code ?? null, Date.now(), id);
+            procs.delete(id);
+            protoSessions.delete(id);
+          });
+          proto = revived;
+        } catch (e: any) {
+          (req as any).log.warn({ id, err: String(e?.message || e) }, 'Failed to revive session process');
+          return reply.code(503).send({ error: 'session process not available' });
+        }
+      }
       // Persist user message
       const turnId = crypto.randomUUID();
       const now = Date.now();
