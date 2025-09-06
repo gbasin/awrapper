@@ -24,7 +24,7 @@ Note: parsed_cmd inside exec_command_begin.msg.parsed_cmd carries typed intents 
 - All events for that turn share id === turn_id. task_started begins that run; task_complete ends it.
 - If task_started is missing, the UI can fall back to grouping by the last event id (mirrors current non‑SPA behavior).
 
-## UI Proposal
+## UI Proposal (No‑Preview Principle)
 
 Inline, per‑message timeline. Default collapsed; each item shows exactly one concise summary line. Expanding an item reveals the full content (not truncated) in a scrollable, formatted code box where applicable.
 
@@ -34,7 +34,7 @@ Inline, per‑message timeline. Default collapsed; each item shows exactly one c
   - Indicates status: Running, Succeeded, Failed, or Timed Out.
 - Expand/Collapse controls per-trace
 - Timeline items (ordered):
-  - Reasoning: collapsed = one line “Reasoning (N chars)”; expanded = full reasoning text (pre‑wrap) with copy.
+  - Reasoning: multiple sections delimited by `agent_reasoning_section_break`. Collapsed shows the section’s bold Markdown heading (first line `**...**`) when present; otherwise “Reasoning (N chars)”. Expanded shows full section text (pre‑wrap) with copy.
   - Tool Call: one item per call_id.
     - Collapsed line: “Tool • <intent> — <cmd> (exit <code> • <duration> • <lines> lines)”.
     - Expanded: full stdout/stderr (prefer formatted_output) in a scrollable mono box with copy. Stream interim output live until end.
@@ -54,7 +54,7 @@ Inline, per‑message timeline. Default collapsed; each item shows exactly one c
   - Poll GET /sessions/:id/log?tail=800 (or ‘all’ when user requests).
   - Parse JSONL lines into events (reuse logic below).
   - Group events by run id (turn_id); identify the active run as the last task_started id (fallback to last event id if none).
-  - Build a derived Trace object per run: { runId, status, startedAt?, completedAt?, tokens, reasoningText, assistantText, tools: ToolCall[] }.
+  - Build a derived Trace object per run: { runId, status, startedAt?, completedAt?, tokens, reasoningSections: ReasoningSection[], assistantText, tools: ToolCall[] }.
   - ToolCall: { callId, command, parsedIntent, startedAt, endedAt, exitCode, durationMs, fullOutput }.
 
 - Streaming behavior
@@ -85,9 +85,14 @@ export type AgentTrace = {
   startedAt?: number
   completedAt?: number
   tokens?: { input: number; output: number; total: number }
-  reasoning: string
+  reasoningSections: ReasoningSection[]
   assistant: string
   tools: ToolCall[]
+}
+
+export type ReasoningSection = {
+  title?: string // extracted from leading **Bold** line when present
+  text: string
 }
 
 export type ToolCall = {
@@ -109,3 +114,22 @@ export type ToolCall = {
 - No previews: collapsed shows a 1‑line summary only; expanded shows full content in a scrollable code box with copy.
 - Icons: Reasoning (light bulb), Tools (wrench/terminal), Assistant (message), Tokens (meter).
 - Accessibility: details/summary or custom disclosure with aria-expanded; ensure live updates announce minimal changes.
+
+## Collapsed Summary Generation Rules
+
+- Reasoning sections
+  - Detection: Use `agent_reasoning_section_break` to segment sections while streaming deltas. When an `agent_reasoning` snapshot arrives, replace the current section text with the snapshot.
+  - Title extraction: If a section’s text begins with a line that matches `^\s*\*\*(.+?)\*\*\s*$`, use the captured text as the collapsed title (e.g., `**Summarizing codebase details**`).
+  - Fallback: If no bold line, render “Reasoning (N chars)”.
+
+- Tool calls
+  - No explicit summary string in logs. Build a deterministic one‑liner from `exec_command_begin.msg.parsed_cmd`:
+    - read → `read — <name>` (from `name` or the command string)
+    - list_files → `list files — <path>`
+    - search → `search — <query>` (append `in <path>` if present)
+    - unknown → `exec — <command>`
+  - Append result metadata once known: `(exit <code> • <duration> • <lines> lines)` using `exec_command_end` fields and line count from `formatted_output`.
+
+- Assistant drafts/final
+  - Draft: always `Draft response (N chars)` without content preview.
+  - Final: `Assistant message (N chars)`.
