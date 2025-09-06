@@ -1,51 +1,40 @@
-# UI Modernization Plan — shadcn/ui + Tailwind
+# UI Modernization Plan — shadcn/ui + Tailwind (Full PWA)
 
-Status: proposal
+Status: proposal (updated for immediate full PWA; dark mode deferred)
 
 ## Goals
 
-- Make the existing GUI clean, modern, and accessible while staying fast and low‑friction.
-- Keep backend simple (Fastify, server‑rendered endpoints remain) and layer in a modern UI where it adds the most value.
-- Prefer shadcn/ui aesthetics and component ergonomics; enable dark mode, consistent typography, and responsive layout.
-- Minimize disruption; allow incremental rollout without blocking current flows.
+- Deliver a clean, modern, accessible UI using shadcn/ui and Tailwind.
+- Move directly to a single‑page app (SPA) with PWA capabilities; retire server‑rendered pages.
+- Keep backend simple; reuse current REST endpoints without large API changes.
+- Optimize for developer velocity; minimize bespoke UI logic.
 
 ## Current State (Summary)
 
 - Server: Fastify with server‑rendered HTML in `src/server.ts`, layout/styles in `src/ui.ts`.
-- UI: Plain HTML + inline CSS, minimal JS embedded per page (directory browser, session poller, etc.).
-- No front‑end build pipeline or static asset serving (no React/Vite/Tailwind today).
+- UI: Plain HTML + inline CSS, minimal embedded JS (directory browser, polling).
+- No front‑end build pipeline today.
 
-Paths to prettify range from “low‑touch CSS polish” to a full React + Tailwind app using shadcn/ui. Because shadcn/ui is a set of React components styled via Tailwind + Radix UI, adopting it fully means adding a small front‑end app.
+This plan replaces the server‑rendered UI with a Vite React app using shadcn/ui and serves it from the same Fastify server. PWA features (installability, offline shell) are included.
 
-## Options Considered
+## Decision
 
-1) Keep SSR HTML, add Tailwind via CDN, and restyle templates
-- Pros: Very low effort; no new build step.
-- Cons: shadcn/ui components are React; we’d only mimic look/feel, not reuse components. Tailwind Play CDN is OK for prototyping, not ideal long‑term. Interactive widgets (dialogs, menus) would be bespoke.
+- Adopt full SPA/PWA now (no hybrid). Remove SSR pages once SPA reaches basic parity.
+- Skip dark mode initially; ship a light theme only. Add dark mode later if wanted.
 
-2) Hybrid: Keep existing pages, add a small React “island” for rich views
-- Pros: Incremental; keep `/` SSR for quick boot, render `/sessions/:id` as React for a polished chat/log experience.
-- Cons: Two rendering models in one app; some duplication in styles.
+## Architecture
 
-3) SPA for app shell (React + Vite + Tailwind + shadcn/ui), use existing REST endpoints
-- Pros: First‑class shadcn/ui, cohesive design system, strong component ergonomics, easier complex UX (dialogs, tabs, toasts, forms).
-- Cons: Introduces front‑end build and static assets; small server changes to serve `/web/dist`.
-
-Recommendation: Option 2 → 3. Start hybrid for minimal disruption, then consolidate into an app shell once stable.
-
-## Recommended Architecture
-
-- Create `web/` (Vite + React + TypeScript + Tailwind + shadcn/ui) alongside the existing Node server.
-- Serve built static assets from Fastify at `/app` (or `/` once stable) via `@fastify/static`.
-- Use existing REST endpoints (`/sessions`, `/sessions/:id`, `/sessions/:id/messages`, `/browse`, etc.). Optionally add a JSON session list endpoint if/as needed.
-- Preserve SSR `/` page initially; link into the React app at `/app` for the “pretty” experience. Later, flip `/` → app.
+- New `web/` app: Vite + React + TypeScript + Tailwind + shadcn/ui + `vite-plugin-pwa`.
+- Serve `web/dist` from Fastify at `/` via `@fastify/static`. All unknown routes fall back to `index.html`.
+- Keep existing REST endpoints as‑is (`/sessions`, `/sessions/:id`, `/sessions/:id/messages`, `/browse`, etc.).
+- During dev, run Vite dev server; for prod, embed built assets.
 
 ### Directory Layout
 
 ```
 awrapper/
-  src/                 # existing server
-  web/                 # new front-end app (Vite)
+  src/                 # existing server (Fastify + REST)
+  web/                 # new front-end app (Vite SPA + PWA)
     index.html
     src/
       main.tsx
@@ -53,135 +42,41 @@ awrapper/
       routes/
         Home.tsx        # sessions list + create
         Session.tsx     # chat/logs view
+        BrowseDialog.tsx
       components/       # shadcn components + wrappers
       lib/
         api.ts          # fetch helpers for existing endpoints
+        query.ts        # react-query client
         utils.ts        # cn() util, helpers
       styles/
-        globals.css     # tailwind base, shadcn tokens
+        globals.css     # tailwind base
+    public/
+      manifest.webmanifest
+      icons/            # PWA icons
     tailwind.config.ts
     postcss.config.js
     tsconfig.json
+    vite.config.ts
     package.json
 ```
 
 ### Front-end Stack
 
-- React + Vite
+- React + React Router
 - Tailwind CSS + `tailwindcss-animate`
-- shadcn/ui via CLI (components copied into repo for full control)
+- shadcn/ui (components copied for control)
 - `lucide-react` for icons
-- Optional: `@tanstack/react-query` for data fetching, `sonner` for toasts
+- `@tanstack/react-query` for data fetching + caching
+- `vite-plugin-pwa` for manifest + service worker
+- `sonner` for toasts (lightweight)
 
 ### Server Integration
 
-- Add `@fastify/static` and serve `web/dist` under `/app`.
-- Keep API routes as-is; if needed, add lightweight JSON endpoints mirroring HTML pages.
-- During development, run Vite dev server on another port and proxy or open separately.
+- Add `@fastify/static` to serve `web/dist` at root.
+- SPA fallback: route all non‑API GETs to `index.html`.
+- Keep current endpoints; if a clean separation is preferred, prefix new endpoints with `/api/*` over time, but not required now.
 
-## UI Design & Component Mapping
-
-Global
-- Theme: shadcn/ui default neutral; dark mode first with `dark` class strategy.
-- Typography: Inter (UI) + JetBrains Mono (logs). System fonts acceptable fallback.
-- Layout: App shell with header bar and content container; responsive up to mobile.
-
-Home (Sessions List + Create)
-- Components: `Card`, `Table`, `Badge`, `Button`, `Input`, `Select`, `Textarea`, `Dialog`, `Breadcrumb`.
-- Interactions: New session form inline; advanced repo picker in a `Dialog` (replace current server browser with richer UX using breadcrumb + list). Recent repos as `Combobox` or `Datalist`-style `Popover`.
-
-Session Detail (Chat + Logs)
-- Components: `Tabs` (Messages, Logs), `ScrollArea`, `Textarea` + `Button` for input, `Separator`, `Badge` for status, `Skeleton` while loading.
-- Chat bubbles: Use `Card`/custom container; preserve monospace where needed for code. Add copy buttons for messages.
-- Logs: Dark `ScrollArea` with fixed‑height panel; tailing indicator; use monospace + subtle color.
-- Actions: “Cancel/Stop” session → `Button` (destructive) with `AlertDialog` confirmation.
-
-Repo Browser (Dialog)
-- Components: `Dialog`, `Breadcrumb`, `Input` (path), `Toggle` or `Switch` for “Only Git repos”.
-- List directories with secondary metadata (• git); show “Use here” and “Select” actions.
-
-Feedback
-- Use `sonner` toasts for transient success/error; inline `Form` validation states for inputs.
-
-Accessibility
-- Keep shadcn defaults (Radix primitives are a11y‑friendly). Ensure semantic markup for tables, buttons, labels.
-
-## Data Flow
-
-- Read: fetch JSON from existing endpoints; cache with React Query (optional) and background refresh.
-- Write: POST to existing endpoints; optimistic UI for message send; error states surfaced via toast + inline.
-- Polling: replace ad‑hoc polling with React Query `refetchInterval` for messages/logs; adjust to avoid server overload.
-
-## Theming & Tokens
-
-- Use shadcn/ui CSS variables in `:root` to define color system.
-- Enable `darkMode: ['class']` in Tailwind; wrap `ThemeProvider` to toggle if desired.
-- Keep code/log monospace at consistent sizes; avoid full‑page zoom on mobile.
-
-## Implementation Plan (Incremental)
-
-Phase 0 — Quick Polish (1–2h)
-- Keep SSR; add minimal CSS tuning in `src/ui.ts` (spacing, color, buttons) to reduce rough edges while the real UI lands.
-
-Phase 1 — Bootstrap `web/` (0.5–1 day)
-- Scaffold Vite React app under `web/`.
-- Install Tailwind, `tailwindcss-animate`, shadcn CLI; run `shadcn init` and add base components: `button`, `input`, `select`, `textarea`, `card`, `table`, `tabs`, `dialog`, `separator`, `badge`, `scroll-area`, `alert-dialog`, `popover`.
-- Add `lucide-react`, optional `@tanstack/react-query`, `sonner`.
-- Implement `/app` routes: Home (sessions) + Session (messages/logs).
-- Wire to existing endpoints with a small `api.ts` wrapper.
-
-Phase 2 — Serve Static Assets (0.5 day)
-- Add `@fastify/static` in server to serve `web/dist` at `/app`.
-- Add Turbo task to build `web` during root `build`; ensure `pnpm ci` builds both.
-
-Phase 3 — Replace SSR Pages (optional, 0.5–1 day)
-- Redirect `/` to `/app` and/or embed React app as default shell.
-- Remove redundant SSR forms as the React app reaches feature parity.
-
-## Setup Details
-
-Front-end bootstrap (inside `web/`)
-
-```bash
-# from repo root
-pnpm --filter awrapper exec echo "using root only for now"
-
-# create web/
-mkdir -p web && cd web
-pnpm init -y
-pnpm add react react-dom
-pnpm add -D vite typescript @types/react @types/react-dom tailwindcss postcss autoprefixer tailwindcss-animate
-pnpm dlx tailwindcss init -p
-
-# shadcn/ui
-pnpm dlx shadcn@latest init
-pnpm dlx shadcn@latest add button input select textarea card table tabs dialog separator badge scroll-area alert-dialog popover
-
-pnpm add lucide-react
-# optional
-pnpm add @tanstack/react-query sonner
-```
-
-Tailwind config (key points)
-
-```ts
-// web/tailwind.config.ts
-import type { Config } from 'tailwindcss'
-export default {
-  darkMode: ['class'],
-  content: ['index.html', 'src/**/*.{ts,tsx}'],
-  theme: {
-    extend: {
-      colors: { /* shadcn tokens configured by CLI */ },
-      keyframes: { /* tailwindcss-animate */ },
-      animation: { /* tailwindcss-animate */ },
-    },
-  },
-  plugins: [require('tailwindcss-animate')],
-} satisfies Config
-```
-
-Server static hosting (snippet)
+Server snippet
 
 ```ts
 // src/server.ts
@@ -190,14 +85,139 @@ import path from 'node:path'
 
 await app.register(fastifyStatic, {
   root: path.resolve(__dirname, '../web/dist'),
-  prefix: '/app/',
+  prefix: '/',
   index: ['index.html'],
 })
 
-app.get('/app/*', (_req, reply) => {
-  // SPA fallback
-  // @ts-ignore - reply.sendFile from fastify-static
+// SPA fallback for client routes (exclude known API prefixes)
+const clientPaths = new Set(['/sessions', '/browse']) // adjust if moving APIs under /api
+app.get('/*', (req, reply) => {
+  const url = String((req as any).raw.url || '')
+  if (url.startsWith('/sessions') || url.startsWith('/browse')) return reply.callNotFound()
+  // @ts-ignore sendFile from fastify-static
   return (reply as any).sendFile('index.html')
+})
+```
+
+## UI Design & Component Mapping
+
+Global
+- Theme: light only for v1 (no dark mode yet).
+- Typography: Inter (UI) + JetBrains Mono (logs) or system fallbacks.
+- Layout: App shell header with content container; responsive to mobile.
+
+Home (Sessions List + Create)
+- Components: `Card`, `Table`, `Badge`, `Button`, `Input`, `Select`, `Textarea`, `Dialog`, `Breadcrumb`.
+- Interactions: Create session inline; repo picker in `Dialog` with breadcrumb + list; recent repos via `Popover`.
+
+Session Detail (Chat + Logs)
+- Components: `Tabs` (Messages, Logs), `ScrollArea`, `Textarea` + `Button` for input, `Separator`, `Badge` for status, `Skeleton` while loading.
+- Chat bubbles with code formatting and copy button.
+- Logs panel: fixed height, monospace, auto‑tail with network‑aware polling.
+- Actions: Cancel session with `AlertDialog` confirmation.
+
+Repo Browser (Dialog)
+- Components: `Dialog`, `Breadcrumb`, `Input` (path), `Switch` for “Only Git repos”.
+- Shows directories with metadata (• git), actions: Select / Use here.
+
+Feedback
+- `sonner` toasts for transient messages; inline form validation.
+
+Accessibility
+- Rely on Radix primitives via shadcn/ui; label all inputs and buttons.
+
+## Data & Polling
+
+- Read: fetch JSON from existing endpoints; cache with React Query.
+- Write: POST to existing endpoints; optimistic updates for user messages.
+- Polling: `refetchInterval` for messages/logs with adaptive backoff when idle.
+
+## PWA
+
+- `vite-plugin-pwa` to generate `manifest.webmanifest` and service worker.
+- Caching strategy:
+  - App shell: pre‑cache (workbox `navigateFallback` to `index.html`).
+  - API calls: network‑first with short cache (or no cache) for freshness.
+  - Static assets: cache‑first with revision hashing.
+- Metadata: name `awrapper`, theme color (light), icons (512/192/96 variants).
+
+## Theming & Tokens
+
+- Use shadcn/ui default tokens. Defer dark mode variables.
+- Consistent monospace sizes for logs/code.
+
+## Implementation Plan
+
+Phase 1 — Bootstrap SPA/PWA (0.5–1 day)
+- Scaffold Vite React app under `web/`.
+- Install Tailwind, `tailwindcss-animate`, shadcn CLI; run `shadcn init` and add base components: `button`, `input`, `select`, `textarea`, `card`, `table`, `tabs`, `dialog`, `separator`, `badge`, `scroll-area`, `alert-dialog`, `popover`.
+- Add router, query client, toasts, icons, and PWA plugin.
+- Build Home + Session routes; wire to `/sessions*`, `/browse`, `/sessions/:id/messages`.
+
+Phase 2 — Serve Static From Server (0.5 day)
+- Add `@fastify/static` and SPA fallback at `/`.
+- Remove/disable SSR pages in `src/server.ts` once SPA is reachable.
+
+Phase 3 — Polish & QA (0.5 day)
+- Validate create flow, repo browser dialog, message send, cancel session, logs tailing.
+- Handle error/empty states; keyboard shortcut to send (Cmd/Ctrl+Enter).
+- Mobile checks for forms, tables, logs.
+
+## Setup Details
+
+Bootstrapping commands (inside `web/`)
+
+```bash
+mkdir -p web && cd web
+pnpm init -y
+pnpm add react react-dom react-router-dom @tanstack/react-query lucide-react sonner
+pnpm add -D vite typescript @types/react @types/react-dom tailwindcss postcss autoprefixer tailwindcss-animate vite-plugin-pwa
+pnpm dlx tailwindcss init -p
+
+# shadcn/ui
+pnpm dlx shadcn@latest init
+pnpm dlx shadcn@latest add button input select textarea card table tabs dialog separator badge scroll-area alert-dialog popover
+```
+
+Tailwind config (key points)
+
+```ts
+// web/tailwind.config.ts
+import type { Config } from 'tailwindcss'
+export default {
+  darkMode: false, // defer dark mode
+  content: ['index.html', 'src/**/*.{ts,tsx}'],
+  theme: { extend: {} },
+  plugins: [require('tailwindcss-animate')],
+} satisfies Config
+```
+
+PWA config (key points)
+
+```ts
+// web/vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      manifest: {
+        name: 'awrapper',
+        short_name: 'awrapper',
+        display: 'standalone',
+        theme_color: '#ffffff',
+        background_color: '#ffffff',
+        icons: [
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+        ],
+      },
+    }),
+  ],
 })
 ```
 
@@ -219,29 +239,21 @@ Build orchestration
 
 ## Rollout Checklist
 
-- Basic theming + typography set; dark mode works.
-- Home: sessions list styled; create form clean; repo picker dialog functional.
-- Session: tabs for Messages/Logs; message send flow; cancel session confirmation.
-- Error/empty states covered; toasts wired; keyboard shortcuts for send.
-- Mobile check for forms, tables, and logs.
+- SPA served from `/` with fallback routing.
+- Home: sessions list styled; create form; repo picker dialog.
+- Session: tabs for Messages/Logs; message send; cancel session; logs tailing.
+- Error/empty states; toasts; keyboard shortcuts.
+- PWA manifest valid; install prompt works; basic offline shell.
 
 ## Risks & Mitigations
 
-- Added complexity (front-end build): keep `web/` small; rely on shadcn/ui and React Query to avoid bespoke infra.
-- Duplicate rendering (SSR + React): limit SSR to `/` during transition; point users to `/app` early.
-- Styling drift: keep all custom UI inside `web/`; avoid mixing Tailwind into server templates beyond Phase 0 polish.
-
-## Alternative (No React)
-
-If React is undesirable, we can:
-- Use Tailwind via CDN and restyle current templates; adopt lightweight JS (HTMX/Alpine) for dialogs/menus.
-- Copy shadcn visual patterns (spacing, radii, colors) via CSS variables without components.
-Tradeoffs: more bespoke JS for interactivity; less reuse of shadcn components.
+- Added build complexity: keep `web/` small; rely on shadcn/ui and React Query.
+- Offline expectations: limit to app shell; don’t cache dynamic logs aggressively.
+- API 404s during SPA fallback: ensure server excludes API paths from `index.html` fallback.
 
 ## Next Steps
 
-1) Confirm Option 2→3 approach and `/app` mount path.
-2) Approve adding `web/` with Vite + shadcn/ui scaffold.
-3) Implement Home and Session screens; wire APIs; ship behind `/app`.
-4) Iterate on polish; decide on making `/` → `/app` default.
-
+1) Approve full SPA/PWA approach served at `/` (no dark mode initially).
+2) Approve adding `web/` scaffold with Vite + shadcn/ui + PWA plugin.
+3) Implement Home and Session screens; wire to existing endpoints.
+4) Remove SSR pages once SPA is usable.

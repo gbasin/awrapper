@@ -404,7 +404,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
                 .then(function(res){ return res.json(); })
                 .then(function(data){ dbg('poll: session ok', data && data.id); return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } }); })
                 .then(function(res){ return res.json(); })
-                .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); document.getElementById('msgs').textContent = msgs.map(function(m){ return '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; }).join('\n'); return fetch('/sessions/' + id + '/log?tail=500'); })
+                .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=500'); })
                 .then(function(res){ return res.text(); })
                 .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; dbg('poll: done'); dbgPost('poll-done'); })
                 .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
