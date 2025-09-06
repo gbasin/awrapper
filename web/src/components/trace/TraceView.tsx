@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AgentTrace, ToolCall, formatDuration } from '../../lib/agent-trace'
+import { AgentTrace, ToolCall, ReasoningSection, formatDuration } from '../../lib/agent-trace'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { CodeBlock } from '../ui/code-block'
@@ -27,9 +27,7 @@ export function TraceView({ trace, className }: { trace: AgentTrace; className?:
       {open && (
         <div className="border-t">
           <div className="max-h-96 overflow-y-auto p-2 space-y-2 bg-slate-50">
-            <ReasoningSections sections={trace.reasoningSections} />
-            <ToolCalls tools={trace.tools} />
-            {trace.assistant && <AssistantItem text={trace.assistant} />}
+            <Timeline trace={trace} />
             {trace.errors.length > 0 && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
                 <div className="font-medium">Errors</div>
@@ -67,61 +65,82 @@ function buildSummary(t: AgentTrace): string {
   return parts.join(' • ')
 }
 
-function ReasoningSections({ sections }: { sections: AgentTrace['reasoningSections'] }) {
-  if (!sections.length) return null
+function Timeline({ trace }: { trace: AgentTrace }) {
+  const items = useMemo(() => {
+    const arr: Array<{ kind: 'reasoning'; section: ReasoningSection } | { kind: 'tool'; tool: ToolCall } | { kind: 'assistant'; text: string; seq: number }> = []
+    for (const s of trace.reasoningSections) arr.push({ kind: 'reasoning', section: s })
+    for (const t of trace.tools) arr.push({ kind: 'tool', tool: t })
+    if (trace.assistant) arr.push({ kind: 'assistant', text: trace.assistant, seq: trace.assistantSeq || Number.MAX_SAFE_INTEGER })
+    return arr.sort((a, b) => (getSeq(a) - getSeq(b)))
+  }, [trace])
   return (
     <div className="space-y-1">
-      {sections.map((s, i) => (
-        <details key={i} className="rounded border bg-white">
-          <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
-            <Lightbulb className="h-4 w-4 text-amber-500" />
-            <span className="font-medium">{s.title || `Reasoning (${s.text.length} chars)`}</span>
-          </summary>
-          <div className="border-t p-2">
-            <div className="relative">
-              <CodeBlock code={s.text} className="text-[11px]" />
-              <CopyButton text={s.text} className="absolute right-2 top-2" />
-            </div>
-          </div>
-        </details>
+      {items.map((it, i) => (
+        it.kind === 'reasoning' ? (
+          <ReasoningItem key={`r-${i}`} section={it.section} />
+        ) : it.kind === 'tool' ? (
+          <ToolItem key={it.tool.callId} tool={it.tool} />
+        ) : (
+          <AssistantItem key={`a-${i}`} text={it.text} />
+        )
       ))}
     </div>
   )
 }
 
-function ToolCalls({ tools }: { tools: ToolCall[] }) {
-  if (!tools.length) return null
+function getSeq(it: { kind: 'reasoning'; section: ReasoningSection } | { kind: 'tool'; tool: ToolCall } | { kind: 'assistant'; seq: number }) {
+  return it.kind === 'reasoning' ? (it.section.seq || 0) : it.kind === 'tool' ? (it.tool.seq || 0) : it.seq
+}
+
+function ReasoningItem({ section }: { section: ReasoningSection }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="space-y-1">
-      {tools.map((t) => {
-        const status = t.exitCode == null ? 'Running' : t.exitCode === 0 ? 'Succeeded' : 'Failed'
-        const dur = formatDuration(t.durationMs)
-        const lines = t.fullOutput ? String(t.fullOutput).split(/\r?\n/).length : 0
-        const meta: string[] = []
-        if (t.exitCode != null) meta.push(`exit ${t.exitCode}`)
-        if (dur) meta.push(dur)
-        if (lines) meta.push(`${lines} lines`)
-        return (
-          <details key={t.callId} className="rounded border bg-white">
-            <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
-              <Wrench className="h-4 w-4 text-slate-700" />
-              <span className="font-medium">{collapsedToolLabel(t)}</span>
-              <span className="text-slate-500">{meta.length ? `(${meta.join(' • ')})` : ''}</span>
-              <Badge className="ml-2" variant={t.exitCode == null ? 'warning' : t.exitCode === 0 ? 'success' : 'destructive'}>
-                {status}
-              </Badge>
-            </summary>
-            <div className="border-t p-2">
-              {t.cwd && <div className="mb-1 text-xs text-slate-500">cwd: {t.cwd}</div>}
-              <div className="relative">
-                <CodeBlock code={t.fullOutput || ''} className="text-[11px]" />
-                <CopyButton text={t.fullOutput || ''} className="absolute right-2 top-2" />
-              </div>
-            </div>
-          </details>
-        )
-      })}
-    </div>
+    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
+      <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
+        <Lightbulb className="h-4 w-4 text-amber-500" />
+        <span className="font-medium">{section.title || `Reasoning (${section.text.length} chars)`}</span>
+      </summary>
+      {open && (
+        <div className="border-t p-2">
+          <div className="relative">
+            <CodeBlock code={section.text} className="text-[11px]" />
+            <CopyButton text={section.text} className="absolute right-2 top-2" />
+          </div>
+        </div>
+      )}
+    </details>
+  )
+}
+
+function ToolItem({ tool }: { tool: ToolCall }) {
+  const [open, setOpen] = useState(false)
+  const status = tool.exitCode == null ? 'Running' : tool.exitCode === 0 ? 'Succeeded' : 'Failed'
+  const dur = formatDuration(tool.durationMs)
+  const lines = tool.fullOutput ? String(tool.fullOutput).split(/\r?\n/).length : 0
+  const meta: string[] = []
+  if (tool.exitCode != null) meta.push(`exit ${tool.exitCode}`)
+  if (dur) meta.push(dur)
+  if (lines) meta.push(`${lines} lines`)
+  return (
+    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
+      <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
+        <Wrench className="h-4 w-4 text-slate-700" />
+        <span className="font-medium">{collapsedToolLabel(tool)}</span>
+        <span className="text-slate-500">{meta.length ? `(${meta.join(' • ')})` : ''}</span>
+        <Badge className="ml-2" variant={tool.exitCode == null ? 'warning' : tool.exitCode === 0 ? 'success' : 'destructive'}>
+          {status}
+        </Badge>
+      </summary>
+      {open && (
+        <div className="border-t p-2">
+          {tool.cwd && <div className="mb-1 text-xs text-slate-500">cwd: {tool.cwd}</div>}
+          <div className="relative">
+            <pre className="mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs">{tool.fullOutput || ''}</pre>
+            <CopyButton text={tool.fullOutput || ''} className="absolute right-2 top-2" />
+          </div>
+        </div>
+      )}
+    </details>
   )
 }
 
@@ -132,18 +151,21 @@ function collapsedToolLabel(t: ToolCall): string {
 }
 
 function AssistantItem({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
   return (
-    <details className="rounded border bg-white">
+    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
       <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
         <MessageSquareText className="h-4 w-4 text-slate-700" />
         <span className="font-medium">Assistant message ({text.length} chars)</span>
       </summary>
-      <div className="border-t p-2">
-        <div className="relative">
-          <CodeBlock code={text} className="text-[11px]" />
-          <CopyButton text={text} className="absolute right-2 top-2" />
+      {open && (
+        <div className="border-t p-2">
+          <div className="relative">
+            <CodeBlock code={text} className="text-[11px]" />
+            <CopyButton text={text} className="absolute right-2 top-2" />
+          </div>
         </div>
-      </div>
+      )}
     </details>
   )
 }

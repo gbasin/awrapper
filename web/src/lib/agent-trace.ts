@@ -10,6 +10,7 @@ export type AgentTrace = {
   tokens?: { input: number; output: number; total: number }
   reasoningSections: ReasoningSection[]
   assistant: string
+  assistantSeq?: number
   tools: ToolCall[]
   errors: string[]
 }
@@ -17,6 +18,7 @@ export type AgentTrace = {
 export type ReasoningSection = {
   title?: string
   text: string
+  seq?: number
 }
 
 export type ParsedCmdEntry = {
@@ -38,6 +40,7 @@ export type ToolCall = {
   exitCode?: number
   durationMs?: number
   fullOutput?: string
+  seq?: number
 }
 
 type RawEvent = {
@@ -119,7 +122,7 @@ export function useAgentTraces(sessionId: string) {
 }
 
 export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
-  const byRun = new Map<string, AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number }>()
+  const byRun = new Map<string, AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number }>()
 
   function ensure(runId: string): AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number } {
     let t = byRun.get(runId)
@@ -132,10 +135,12 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         tokens: undefined,
         reasoningSections: [],
         assistant: '',
+        assistantSeq: undefined,
         tools: [],
         errors: [],
         _toolMap: new Map(),
         _reasoningIdx: -1,
+        _seq: 0,
       }
       byRun.set(runId, t)
     }
@@ -149,7 +154,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
 
     switch (e.type) {
       case 'task_started': {
-        t.startedAt = ts(e.raw?.ts) || t.startedAt || Date.now()
+        t.startedAt = ts(e.raw?.ts) || t.startedAt
         t.status = 'running'
         break
       }
@@ -157,7 +162,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         const delta = String(e.msg?.delta || '')
         if (t._reasoningIdx < 0) {
           t._reasoningIdx = t.reasoningSections.length
-          t.reasoningSections.push({ text: delta })
+          t.reasoningSections.push({ text: delta, seq: ++t._seq })
         } else {
           t.reasoningSections[t._reasoningIdx].text += delta
         }
@@ -176,18 +181,23 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         // Snapshot replaces the CURRENT section text, not all sections
         if (t._reasoningIdx < 0) {
           t._reasoningIdx = t.reasoningSections.length
-          t.reasoningSections.push({ text, title: extractTitleFromMarkdown(text) })
+          t.reasoningSections.push({ text, title: extractTitleFromMarkdown(text), seq: ++t._seq })
         } else {
-          t.reasoningSections[t._reasoningIdx] = { text, title: extractTitleFromMarkdown(text) }
+          const keepSeq = t.reasoningSections[t._reasoningIdx]?.seq
+          t.reasoningSections[t._reasoningIdx] = { text, title: extractTitleFromMarkdown(text), seq: keepSeq ?? ++t._seq }
         }
         break
       }
       case 'agent_message_delta': {
+        // Accumulate draft text but don't place in timeline yet
         t.assistant += String(e.msg?.delta || '')
         break
       }
       case 'agent_message': {
         t.assistant = String(e.msg?.message || '')
+        // Place assistant message near the end of the sequence; final position will be
+        // adjusted again on task_complete to make it last.
+        t.assistantSeq = ++t._seq
         break
       }
       case 'token_count': {
@@ -208,8 +218,9 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
           parsedIntent: label.intent || 'unknown',
           summaryLabel: label.label,
           cwd: e.msg?.cwd || undefined,
-          startedAt: startedAt || Date.now(),
+          startedAt: startedAt,
           fullOutput: '',
+          seq: ++t._seq,
         }
         t._toolMap.set(callId, tc)
         t.tools.push(tc)
@@ -228,7 +239,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         const tc = t._toolMap.get(callId)
         if (!tc) break
         tc.exitCode = num(e.msg?.exit_code) ?? undefined
-        tc.endedAt = ts(e.raw?.ts) || tc.endedAt || Date.now()
+        tc.endedAt = ts(e.raw?.ts) || tc.endedAt
         const durMs = num(e.msg?.duration_ms)
         tc.durationMs = durMs ?? (tc.startedAt && tc.endedAt ? tc.endedAt - tc.startedAt : undefined)
         const formatted = e.msg?.formatted_output
@@ -244,8 +255,10 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         break
       }
       case 'task_complete': {
-        t.completedAt = ts(e.raw?.ts) || Date.now()
+        t.completedAt = ts(e.raw?.ts)
         if (t.status !== 'error') t.status = 'success'
+        // Ensure the assistant message appears last in the timeline
+        if (t.assistant) t.assistantSeq = ++t._seq
         break
       }
       default:
