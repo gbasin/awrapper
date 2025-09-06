@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import formbody from '@fastify/formbody';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -22,6 +23,24 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // Enable parsing of application/x-www-form-urlencoded for HTML forms
   await app.register(formbody);
 
+  // Serve built SPA if available
+  try {
+    const webDist = path.resolve(process.cwd(), 'web/dist');
+    if (await fs.pathExists(webDist)) {
+      await app.register(fastifyStatic as any, {
+        root: webDist,
+        prefix: '/',
+        index: ['index.html'],
+        decorateReply: false,
+      } as any);
+      app.log.info({ webDist }, 'Static SPA enabled');
+    } else {
+      app.log.info({ webDist }, 'Static SPA not found; skipping');
+    }
+  } catch (e: any) {
+    app.log.warn({ err: String(e?.message || e) }, 'Failed to enable static SPA');
+  }
+
   // Ensure DB and default agents are initialized when server is built directly (e.g., in tests)
   try {
     getDb();
@@ -30,7 +49,17 @@ export async function buildServer(opts?: { listen?: boolean }) {
     // Best-effort; routes will still work without crashing if init fails
   }
 
-  app.get('/', async (_req, reply) => {
+  // Minimal placeholder favicon to avoid 404 noise
+  app.get('/favicon.ico', async (_req, reply) => {
+    const png1x1 = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+      'base64'
+    );
+    reply.header('Cache-Control', 'public, max-age=86400').type('image/png').send(png1x1);
+  });
+
+  // SSR homepage has been replaced by SPA at '/'; keep legacy HTML available under '/__legacy' temporarily
+  app.get('/__legacy', async (_req, reply) => {
     const db = getDb();
     const sessions = db.prepare('select id, agent_id, lifecycle, status, repo_path, branch, started_at, last_activity_at from sessions order by started_at desc limit 50').all() as any[];
     const rows = sessions
@@ -355,7 +384,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
 
     const ctype = String(req.headers['content-type'] || '');
     if (ctype.includes('application/x-www-form-urlencoded')) {
-      return reply.redirect(303, `/sessions/${id}`);
+      return reply.redirect(`/sessions/${id}`, 303);
     }
     reply.send({ id, worktree_path });
   });
@@ -505,8 +534,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
               .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; try { var evs = parseProtoEvents(logText); var info = summarizeEvents(evs); renderTrace(document.getElementById('trace'), info); } catch(e) { dbg('trace parse error', e && e.message); } dbg('poll: done'); })
               .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
           }
-          setInterval(function(){ poll(); }, 1000);
-          poll();
+          setInterval(function(){ poll().catch(() => {}); }, 1000);
+          poll().catch(() => {});
 
             var form = document.getElementById('msgform');
             if (form) form.addEventListener('submit', function(e){
@@ -692,6 +721,22 @@ export async function buildServer(opts?: { listen?: boolean }) {
       }
     }
   }
+
+  // SPA fallback for client-side routes (exclude API endpoints)
+  app.setNotFoundHandler((req, reply) => {
+    const url = String((req as any).raw?.url || '')
+    const method = String((req as any).raw?.method || 'GET')
+    if (method !== 'GET') return reply.code(404).send({ error: 'Not found' })
+    if (url.startsWith('/sessions') || url.startsWith('/browse') || url.startsWith('/client-log')) {
+      return reply.code(404).send({ error: 'Not found' })
+    }
+    try {
+      // @ts-ignore fastify-static sendFile
+      return (reply as any).sendFile('index.html')
+    } catch {
+      return reply.code(404).send({ error: 'Not found' })
+    }
+  });
   return app;
 }
 
