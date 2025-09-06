@@ -10,7 +10,7 @@ import { Button } from '../components/ui/button'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '../components/ui/dialog'
-import { Copy, Send, Trash2 } from 'lucide-react'
+import { Copy, Send, Trash2, Download } from 'lucide-react'
 import { Skeleton } from '../components/ui/skeleton'
 import { cn } from '../lib/utils'
 import { toast } from 'sonner'
@@ -26,6 +26,8 @@ export default function Session() {
   const msgs = useQuery({ queryKey: ['messages', id], queryFn: () => api.listMessages(id), refetchInterval: 1500 })
   const tracesQ = useAgentTraces(id)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [followTail, setFollowTail] = useState(true)
+  const [isAtBottom, setIsAtBottom] = useState(true)
   // Always fetch full log when the modal is open
   const log = useQuery({
     queryKey: ['log', id, 'all'],
@@ -34,7 +36,7 @@ export default function Session() {
     enabled: logsOpen,
   })
   const m = useMutation({ mutationFn: (content: string) => api.sendMessage(id, content), onSuccess: () => setText('') })
-  const logRef = useRef<HTMLPreElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const [wrap, setWrap] = useState<boolean>(() => {
     try {
       return localStorage.getItem('awrapper:logsWrap') !== '0'
@@ -44,8 +46,33 @@ export default function Session() {
   })
 
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [log.data, logsOpen])
+    if (!logsOpen) return
+    const viewport = viewportRef.current
+    if (viewport) viewport.scrollTop = viewport.scrollHeight
+  }, [logsOpen])
+
+  useEffect(() => {
+    if (!logsOpen || !followTail) return
+    const viewport = viewportRef.current
+    if (viewport) viewport.scrollTop = viewport.scrollHeight
+  }, [log.data, followTail, logsOpen])
+
+  // Track whether viewport is at bottom; disable follow when user scrolls up
+  useEffect(() => {
+    if (!logsOpen) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const threshold = 40
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - (viewport.scrollTop + viewport.clientHeight)
+      const atBottom = distance <= threshold
+      setIsAtBottom(atBottom)
+      if (!atBottom && followTail) setFollowTail(false)
+    }
+    onScroll()
+    viewport.addEventListener('scroll', onScroll)
+    return () => viewport.removeEventListener('scroll', onScroll)
+  }, [logsOpen, followTail])
 
   useEffect(() => {
     try { localStorage.setItem('awrapper:logsWrap', wrap ? '1' : '0') } catch {}
@@ -73,32 +100,69 @@ export default function Session() {
               <DialogContent className="max-w-4xl w-[95vw]">
                 <DialogHeader>
                   <DialogTitle>Session logs</DialogTitle>
-                  <DialogDescription>Full log output (most recent at bottom). Backfills older lines progressively.</DialogDescription>
+                  <DialogDescription>Full log output (newest at bottom). Backfills older lines progressively.</DialogDescription>
                 </DialogHeader>
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="text-sm text-slate-600">Wrap lines</div>
-                  <Switch checked={wrap} onCheckedChange={setWrap} />
+                {/* Toolbar */}
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-700">Wrap</span>
+                      <Switch checked={wrap} onCheckedChange={setWrap} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-700 inline-flex items-center gap-2">
+                        Follow
+                        {!isAtBottom && <span className="inline-block h-2 w-2 rounded-full bg-sky-500" title="New logs below" />}
+                      </span>
+                      <Switch checked={followTail} onCheckedChange={(v) => {
+                        setFollowTail(!!v)
+                        if (v) {
+                          const viewport = viewportRef.current
+                          if (viewport) viewport.scrollTop = viewport.scrollHeight
+                        }
+                      }} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        const text = log.data ?? ''
+                        if (!text) return
+                        navigator.clipboard.writeText(text).then(() => toast.success('Logs copied'))
+                      }}
+                      disabled={log.isLoading || !log.data}
+                    >
+                      <Copy className="mr-2 h-3 w-3" /> Copy
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        const text = log.data ?? ''
+                        if (!text) return
+                        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `${s.id}-session.log`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      disabled={log.isLoading || !log.data}
+                    >
+                      <Download className="mr-2 h-3 w-3" /> Download
+                    </Button>
+                  </div>
                 </div>
-                <div className="mb-2 flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      const text = log.data ?? ''
-                      if (!text) return
-                      navigator.clipboard.writeText(text).then(() => toast.success('Logs copied'))
-                    }}
-                    disabled={log.isLoading || !log.data}
-                  >
-                    <Copy className="mr-2 h-3 w-3" /> Copy
-                  </Button>
-                </div>
-                <ScrollArea className="h-[65vh] bg-white p-2 border rounded">
+                <ScrollArea viewportRef={viewportRef} className="h-[65vh] bg-white border rounded" viewportClassName="p-2">
                   {log.isLoading ? (
                     <Skeleton className="h-64 w-full" />
                   ) : (
-                    <BackfillLogViewer refEl={logRef} text={log.data || ''} wrap={wrap} />
+                    <BackfillLogViewer viewportRef={viewportRef} text={log.data || ''} wrap={wrap} follow={followTail} />
                   )}
                 </ScrollArea>
               </DialogContent>
@@ -231,11 +295,26 @@ function parseSegments(s: string): Array<{ type: 'text'; content: string } | { t
 }
 
 // Progressive, bottom-first logs renderer that backfills older lines in batches.
-function BackfillLogViewer({ text, wrap, refEl }: { text: string; wrap: boolean; refEl: React.RefObject<HTMLPreElement> }) {
+function BackfillLogViewer({ text, wrap, follow, viewportRef }: { text: string; wrap: boolean; follow: boolean; viewportRef: React.RefObject<HTMLDivElement> }) {
   const [visible, setVisible] = useState<string>('')
   const timerRef = useRef<number | null>(null)
   const linesRef = useRef<string[]>([])
   const idxRef = useRef<number>(0)
+  const nearBottomRef = useRef<boolean>(true)
+
+  // Track whether the viewport is near bottom to gate auto-scroll
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const threshold = 40
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - (viewport.scrollTop + viewport.clientHeight)
+      nearBottomRef.current = distance <= threshold
+    }
+    onScroll()
+    viewport.addEventListener('scroll', onScroll)
+    return () => viewport.removeEventListener('scroll', onScroll)
+  }, [viewportRef])
 
   useEffect(() => {
     linesRef.current = text ? text.split(/\r?\n/) : []
@@ -249,7 +328,12 @@ function BackfillLogViewer({ text, wrap, refEl }: { text: string; wrap: boolean;
       const slice = linesRef.current.slice(nextIdx, idxRef.current)
       setVisible((prev) => (slice.length ? slice.join('\n') + (prev ? '\n' + prev : '') : prev))
       idxRef.current = nextIdx
-      if (refEl.current) refEl.current.scrollTop = refEl.current.scrollHeight
+      // Keep the viewport pinned to bottom after DOM updates when following and near bottom
+      // Schedule post-render to avoid visible jumps
+      requestAnimationFrame(() => {
+        const viewport = viewportRef.current
+        if (follow && nearBottomRef.current && viewport) viewport.scrollTop = viewport.scrollHeight
+      })
       if (idxRef.current > 0) {
         timerRef.current = window.setTimeout(tick, 0)
       } else {
@@ -258,10 +342,10 @@ function BackfillLogViewer({ text, wrap, refEl }: { text: string; wrap: boolean;
     }
     tick()
     return () => { if (timerRef.current) { window.clearTimeout(timerRef.current); timerRef.current = null } }
-  }, [text])
+  }, [text, follow])
 
   return (
-    <pre ref={refEl} className={cn('mono text-xs', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre')}>
+    <pre className={cn('mono text-xs', wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')}>
       {visible}
     </pre>
   )
