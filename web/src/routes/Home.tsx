@@ -11,6 +11,7 @@ import { Select } from '../components/ui/select'
 import { Textarea } from '../components/ui/textarea'
 import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
+import { Skeleton } from '../components/ui/skeleton'
 
 export default function Home() {
   const qc = useQueryClient()
@@ -37,7 +38,12 @@ export default function Home() {
           <CardTitle>Sessions</CardTitle>
         </CardHeader>
         <CardContent>
-          {q.isLoading && <div>Loading…</div>}
+          {q.isLoading && (
+            <div className="space-y-2">
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-36 w-full" />
+            </div>
+          )}
           {q.error && <div className="text-red-600">Failed to load</div>}
           {q.data && <SessionsTable rows={q.data} />}
         </CardContent>

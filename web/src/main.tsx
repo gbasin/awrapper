@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import App from './App'
 import './styles/globals.css'
+import 'highlight.js/styles/github-dark.css'
 
 const qc = new QueryClient()
 
@@ -17,4 +18,3 @@ root.render(
     </BrowserRouter>
   </QueryClientProvider>
 )
-

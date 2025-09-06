@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -9,6 +9,11 @@ import { Textarea } from '../components/ui/textarea'
 import { Button } from '../components/ui/button'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../components/ui/alert-dialog'
+import { Copy, Send, Trash2 } from 'lucide-react'
+import { Skeleton } from '../components/ui/skeleton'
+import { cn } from '../lib/utils'
+import { toast } from 'sonner'
+import { CodeBlock } from '../components/ui/code-block'
 
 export default function Session() {
   const { id = '' } = useParams()
@@ -49,11 +54,37 @@ export default function Session() {
             <TabsContent value="messages">
               <div className="rounded border">
                 <ScrollArea className="h-[360px] p-2 bg-slate-50">
-                  <pre className="text-xs whitespace-pre-wrap">{msgs.data?.map(m => `[${new Date(m.created_at).toLocaleTimeString()}] ${m.role}: ${m.content}`).join('\n')}</pre>
+                  {msgs.isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-1/2" />
+                      <Skeleton className="h-20 w-3/4" />
+                      <Skeleton className="h-4 w-2/5 ml-auto" />
+                      <Skeleton className="h-16 w-2/3 ml-auto" />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {msgs.data?.map((m) => (
+                        <MessageBubble key={m.id} role={m.role} content={m.content} createdAt={m.created_at} />
+                      ))}
+                    </div>
+                  )}
                 </ScrollArea>
                 <form className="flex gap-2 border-t p-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) m.mutate(text) }}>
-                  <Textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message…" />
-                  <Button disabled={m.isPending} className="self-start" type="submit">{m.isPending ? 'Sending…' : 'Send'}</Button>
+                  <Textarea
+                    rows={3}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault()
+                        if (text.trim() && !m.isPending) m.mutate(text)
+                      }
+                    }}
+                    placeholder="Type a message… (Cmd/Ctrl+Enter to send)"
+                  />
+                  <Button disabled={m.isPending} className="self-start" type="submit">
+                    {m.isPending ? 'Sending…' : (<><Send className="mr-2 h-4 w-4" /> Send</>)}
+                  </Button>
                 </form>
               </div>
             </TabsContent>
@@ -61,7 +92,11 @@ export default function Session() {
             <TabsContent value="logs">
               <div className="rounded border">
                 <ScrollArea className="h-[420px] bg-slate-50 p-2">
-                  <pre ref={logRef} className="mono text-xs whitespace-pre-wrap">{log.data}</pre>
+                  {log.isLoading ? (
+                    <Skeleton className="h-64 w-full" />
+                  ) : (
+                    <pre ref={logRef} className="mono text-xs whitespace-pre-wrap">{log.data}</pre>
+                  )}
                 </ScrollArea>
               </div>
             </TabsContent>
@@ -69,7 +104,7 @@ export default function Session() {
           <div className="mt-3 flex justify-end">
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="destructive">Cancel session</Button>
+                <Button variant="destructive"><Trash2 className="mr-2 h-4 w-4" /> Cancel session</Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
@@ -91,4 +126,50 @@ export default function Session() {
       </Card>
     </div>
   )
+}
+
+function MessageBubble({ role, content, createdAt }: { role: 'user' | 'assistant'; content: string; createdAt: number }) {
+  const segments = useMemo(() => parseSegments(content), [content])
+  const align = role === 'user' ? 'ml-auto bg-slate-200' : 'mr-auto bg-white border'
+  return (
+    <div className={cn('max-w-[90%] rounded-lg p-2', align)}>
+      <div className="mb-1 text-[11px] text-slate-500">[{new Date(createdAt).toLocaleTimeString()}] {role}</div>
+      <div className="space-y-2">
+        {segments.map((seg, i) => (
+          seg.type === 'code' ? (
+            <div key={i} className="relative">
+              <CodeBlock code={seg.content} lang={seg.lang} />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="absolute right-2 top-2"
+                onClick={() => {
+                  navigator.clipboard.writeText(seg.content).then(() => toast.success('Code copied'))
+                }}
+              >
+                <Copy className="mr-2 h-3 w-3" /> Copy
+              </Button>
+            </div>
+          ) : (
+            <p key={i} className="whitespace-pre-wrap text-sm">{seg.content}</p>
+          )
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function parseSegments(s: string): Array<{ type: 'text'; content: string } | { type: 'code'; lang?: string; content: string }> {
+  const segments: Array<{ type: 'text'; content: string } | { type: 'code'; lang?: string; content: string }> = []
+  const re = /```([\w+-]*)?\n([\s\S]*?)```/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s))) {
+    if (m.index > last) segments.push({ type: 'text', content: s.slice(last, m.index) })
+    segments.push({ type: 'code', lang: m[1] || '', content: m[2] })
+    last = re.lastIndex
+  }
+  if (last < s.length) segments.push({ type: 'text', content: s.slice(last) })
+  return segments
 }

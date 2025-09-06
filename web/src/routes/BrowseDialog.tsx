@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog'
 import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
 import { Separator } from '../components/ui/separator'
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator } from '../components/ui/breadcrumb'
+import { Switch } from '../components/ui/switch'
+import { FolderOpen, GitBranch } from 'lucide-react'
 
 type RootsResp = { roots: Array<{ path: string; label: string }> }
 type ListResp = { path: string; parent?: string; entries: Array<{ name: string; path: string; is_dir: boolean; is_repo?: boolean }> }
@@ -42,7 +44,7 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
     if ('roots' in data) {
       return (
         <div className="space-y-2">
-          <div className="text-sm text-slate-500">Roots</div>
+          <div className="flex items-center gap-2 text-sm text-slate-500"><FolderOpen className="h-4 w-4" /> Roots</div>
           <ul className="space-y-1">
             {data.roots.map((r) => (
               <li key={r.path}>
@@ -56,16 +58,36 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
       )
     }
     const entries = (onlyGit ? data.entries.filter((e) => e.is_repo) : data.entries).sort((a, b) => a.name.localeCompare(b.name))
+    const crumbs = useMemo(() => {
+      const parts = data.path.split('/').filter(Boolean)
+      const acc: Array<{ label: string; path: string }> = []
+      let current = data.path.startsWith('/') ? '/' : ''
+      for (let i = 0; i < parts.length; i++) {
+        current = current === '/' ? '/' + parts[i] : (current ? current + '/' : '') + parts[i]
+        acc.push({ label: parts[i], path: current })
+      }
+      return acc
+    }, [data.path])
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between text-sm">
-          <div>
-            Path: <span className="text-slate-500">{data.path}</span>
-          </div>
+          <Breadcrumb>
+            <BreadcrumbItem>
+              <BreadcrumbLink onClick={() => load()} href="#">roots</BreadcrumbLink>
+              <BreadcrumbSeparator />
+            </BreadcrumbItem>
+            {crumbs.map((c, idx) => (
+              <BreadcrumbItem key={c.path}>
+                <BreadcrumbLink href="#" onClick={() => load(c.path)}>{c.label}</BreadcrumbLink>
+                {idx < crumbs.length - 1 && <BreadcrumbSeparator />}
+              </BreadcrumbItem>
+            ))}
+          </Breadcrumb>
           <div className="flex items-center gap-2">
-            <label className="text-slate-600">
-              <input type="checkbox" className="mr-1 align-middle" checked={onlyGit} onChange={(e) => setOnlyGitPersist(e.target.checked)} /> Only Git repos
-            </label>
+            <div className="flex items-center gap-2 text-slate-600">
+              <Switch checked={onlyGit} onCheckedChange={(v) => setOnlyGitPersist(!!v)} />
+              <span>Only Git repos</span>
+            </div>
             <Button variant="secondary" onClick={() => onSelect(data.path)}>Use here</Button>
           </div>
         </div>
@@ -85,8 +107,7 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
           {entries.map((e) => (
             <li key={e.path} className="flex items-center justify-between">
               <Button variant="ghost" onClick={() => load(e.path)} className="px-0 text-left hover:underline">
-                {e.name}
-                {e.is_repo ? ' • git' : ''}
+                {e.name} {e.is_repo ? <span className="ml-1 inline-flex items-center text-emerald-700"><GitBranch className="mr-1 h-3 w-3" />git</span> : ''}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => onSelect(e.path)}>
                 Select
@@ -102,7 +123,7 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="secondary">Browse…</Button>
+        <Button type="button" variant="secondary"><FolderOpen className="mr-2 h-4 w-4" /> Browse…</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -113,4 +134,3 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
     </Dialog>
   )
 }
-
