@@ -1,6 +1,6 @@
 # UI Modernization Plan — shadcn/ui + Tailwind (Full PWA)
 
-Status: proposal (updated for immediate full PWA; dark mode deferred)
+Status: finalized (full SPA/PWA now; dark mode deferred)
 
 ## Goals
 
@@ -19,8 +19,11 @@ This plan replaces the server‑rendered UI with a Vite React app using shadcn/u
 
 ## Decision
 
-- Adopt full SPA/PWA now (no hybrid). Remove SSR pages once SPA reaches basic parity.
-- Skip dark mode initially; ship a light theme only. Add dark mode later if wanted.
+- Serve SPA at `/` immediately; retire SSR pages once SPA reaches parity (ASAP).
+- Keep current REST endpoints as‑is and exclude them from SPA fallback; can move under `/api/*` later if desired.
+- Repo browser: keep `/browse` as is (KISS), no search/favorites initially.
+- Visuals: use shadcn/ui defaults (colors, spacing, radii, typography).
+- PWA offline scope: app shell only (no offline logs/messages yet).
 
 ## Architecture
 
@@ -74,7 +77,7 @@ awrapper/
 
 - Add `@fastify/static` to serve `web/dist` at root.
 - SPA fallback: route all non‑API GETs to `index.html`.
-- Keep current endpoints; if a clean separation is preferred, prefix new endpoints with `/api/*` over time, but not required now.
+- Keep current endpoints and exclude them from SPA fallback.
 
 Server snippet
 
@@ -90,10 +93,15 @@ await app.register(fastifyStatic, {
 })
 
 // SPA fallback for client routes (exclude known API prefixes)
-const clientPaths = new Set(['/sessions', '/browse']) // adjust if moving APIs under /api
 app.get('/*', (req, reply) => {
   const url = String((req as any).raw.url || '')
-  if (url.startsWith('/sessions') || url.startsWith('/browse')) return reply.callNotFound()
+  if (
+    url.startsWith('/sessions') ||
+    url.startsWith('/browse') ||
+    url.startsWith('/client-log')
+  ) {
+    return reply.callNotFound()
+  }
   // @ts-ignore sendFile from fastify-static
   return (reply as any).sendFile('index.html')
 })

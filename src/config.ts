@@ -12,6 +12,8 @@ export const ARTIFACTS_DIR = path.join(DATA_DIR, 'artifacts');
 export const DEFAULT_BIND = process.env.BIND_ADDR || '127.0.0.1';
 export const DEFAULT_PORT = Number(process.env.PORT || 8787);
 export const DEBUG = process.env.AWRAPPER_DEBUG === '1' || process.env.DEBUG === '1';
+export const HTTP_LOG = process.env.AWRAPPER_HTTP_LOG === '1';
+export const PROTO_TRY_CONFIGURE = process.env.AWRAPPER_PROTO_CONFIGURE === '1';
 
 // Comma- or colon-separated list of allowed roots for server-side directory browsing
 // Defaults to the user's home directory.

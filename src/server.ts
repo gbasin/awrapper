@@ -9,13 +9,16 @@ import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
 
 export async function buildServer(opts?: { listen?: boolean }) {
-  const app = Fastify({ logger: { transport: { target: 'pino-pretty' } } }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({
+    logger: { transport: { target: 'pino-pretty' }, level: DEBUG ? 'info' : 'warn' },
+    disableRequestLogging: !HTTP_LOG
+  }).withTypeProvider<ZodTypeProvider>();
   // Enable parsing of application/x-www-form-urlencoded for HTML forms
   await app.register(formbody);
 
@@ -303,7 +306,9 @@ export async function buildServer(opts?: { listen?: boolean }) {
       // Attach proto session handler
       const proto = new CodexProtoSession(proc!);
       protoSessions.set(id, proto);
-      try { await proto.configureSession(worktree_path); } catch {}
+      if (PROTO_TRY_CONFIGURE) {
+        try { await proto.configureSession(worktree_path); } catch {}
+      }
       // If an initial message was provided for a persistent session,
       // send it asynchronously and persist both sides of the turn.
       if (initial_message && String(initial_message).trim()) {
@@ -397,20 +402,20 @@ export async function buildServer(opts?: { listen?: boolean }) {
             var DEBUG = ${JSON.stringify(!!debug)};
             function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
             function assign(t, s){ if(!s) return t; for (var k in s){ if(Object.prototype.hasOwnProperty.call(s,k)) t[k]=s[k]; } return t; }
-            function dbgPost(evt, extra){ if(!DEBUG) return; try{ var payload = assign({ evt: evt, id: id, t: Date.now() }, extra || {}); navigator.sendBeacon('/client-log', JSON.stringify(payload)); } catch(_){} }
-            function poll(){
-              dbg('poll: start'); dbgPost('poll-start');
-              return fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
-                .then(function(res){ return res.json(); })
-                .then(function(data){ dbg('poll: session ok', data && data.id); return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } }); })
-                .then(function(res){ return res.json(); })
-                .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=500'); })
-                .then(function(res){ return res.text(); })
-                .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; dbg('poll: done'); dbgPost('poll-done'); })
-                .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
-            }
-            setInterval(function(){ poll(); }, 500);
-            poll();
+          function dbgPost(evt, extra){ if(!DEBUG) return; try{ var payload = assign({ evt: evt, id: id, t: Date.now() }, extra || {}); navigator.sendBeacon('/client-log', JSON.stringify(payload)); } catch(_){} }
+          function poll(){
+            dbg('poll: start');
+            return fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
+              .then(function(res){ return res.json(); })
+              .then(function(data){ dbg('poll: session ok', data && data.id); return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } }); })
+              .then(function(res){ return res.json(); })
+              .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=500'); })
+              .then(function(res){ return res.text(); })
+              .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; dbg('poll: done'); })
+              .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
+          }
+          setInterval(function(){ poll(); }, 1000);
+          poll();
 
             var form = document.getElementById('msgform');
             if (form) form.addEventListener('submit', function(e){
@@ -512,8 +517,18 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // Client-side debug logging endpoint (enabled always; no data persisted)
   app.post('/client-log', async (req, reply) => {
     try {
-      const body = (req.body as any) || {};
-      app.log.info({ client: true, ...body }, 'client-log');
+      let body: any = (req.body as any);
+      if (Buffer.isBuffer(body)) body = body.toString('utf8');
+      if (typeof body === 'string') {
+        try { body = JSON.parse(body); } catch { body = { raw: body }; }
+      }
+      const evt = String(body?.evt || '');
+      const record = { client: true, evt, id: body?.id, message: body?.message } as any;
+      // Only log noisy poll events if HTTP_LOG is enabled; otherwise keep just errors and submits
+      const isPollNoise = evt.startsWith('poll-') && !evt.includes('error');
+      if (!isPollNoise) {
+        app.log.info(record, 'client-log');
+      }
       reply.send({ ok: true });
     } catch {
       reply.send({ ok: false });
