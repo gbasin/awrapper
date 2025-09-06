@@ -110,10 +110,7 @@ export default function Session() {
                       <Switch checked={wrap} onCheckedChange={setWrap} />
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-700 inline-flex items-center gap-2">
-                        Follow
-                        {!isAtBottom && <span className="inline-block h-2 w-2 rounded-full bg-sky-500" title="New logs below" />}
-                      </span>
+                      <span className="text-sm text-slate-700 inline-flex items-center">Follow</span>
                       <Switch checked={followTail} onCheckedChange={(v) => {
                         setFollowTail(!!v)
                         if (v) {
@@ -158,13 +155,28 @@ export default function Session() {
                     </Button>
                   </div>
                 </div>
-                <ScrollArea viewportRef={viewportRef} className="h-[65vh] bg-white border rounded" viewportClassName="p-2">
-                  {log.isLoading ? (
-                    <Skeleton className="h-64 w-full" />
-                  ) : (
-                    <BackfillLogViewer viewportRef={viewportRef} text={log.data || ''} wrap={wrap} follow={followTail} />
+                <div className="relative">
+                  <ScrollArea viewportRef={viewportRef} className="h-[65vh] bg-white border rounded" viewportClassName="p-2">
+                    {log.isLoading ? (
+                      <Skeleton className="h-64 w-full" />
+                    ) : (
+                      <BackfillLogViewer viewportRef={viewportRef} text={log.data || ''} wrap={wrap} follow={followTail} />
+                    )}
+                  </ScrollArea>
+                  {!isAtBottom && (
+                    <button
+                      type="button"
+                      className="absolute bottom-3 right-3 rounded-full bg-black text-white text-xs px-3 py-1.5 shadow hover:bg-slate-800"
+                      onClick={() => {
+                        const viewport = viewportRef.current
+                        if (viewport) viewport.scrollTop = viewport.scrollHeight
+                        setFollowTail(true)
+                      }}
+                    >
+                      Jump to bottom
+                    </button>
                   )}
-                </ScrollArea>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -182,7 +194,7 @@ export default function Session() {
                     <Skeleton className="h-16 w-2/3 ml-auto" />
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {msgs.data?.map((m) => (
                       <MessageItem key={m.id} m={m} traces={tracesQ.traces} />
                     ))}
@@ -237,10 +249,10 @@ export default function Session() {
 
 function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTrace> }) {
   const align = m.role === 'user' ? 'ml-auto' : 'mr-auto'
-  const bubbleColor = m.role === 'user' ? 'bg-slate-200' : 'bg-white border'
+  const bubbleColor = m.role === 'user' ? 'bg-slate-100' : 'bg-white border'
   const Trace = m.role === 'assistant' && m.turn_id ? traces.get(m.turn_id) : undefined
   return (
-    <div className={cn('max-w-[90%] space-y-1', align)}>
+    <div className={cn('max-w-[72ch] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[60%] space-y-1', align)}>
       {Trace && (
         <TraceView trace={Trace} />
       )}
@@ -252,9 +264,9 @@ function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTr
 function MessageBubble({ role, content, createdAt, className }: { role: 'user' | 'assistant'; content: string; createdAt: number; className?: string }) {
   const segments = useMemo(() => parseSegments(content), [content])
   return (
-    <div className={cn('rounded-lg p-2', className)}>
-      <div className="mb-1 text-[11px] text-slate-500">[{new Date(createdAt).toLocaleTimeString()}] {role}</div>
-      <div className="space-y-2">
+    <div className={cn('rounded-md py-1.5 px-3', className)}>
+      <div className="mb-1 text-[10px] leading-4 text-slate-500">[{new Date(createdAt).toLocaleTimeString()}] {role}</div>
+      <div className="space-y-1.5">
         {segments.map((seg, i) => (
           seg.type === 'code' ? (
             <div key={i} className="relative">
@@ -272,7 +284,7 @@ function MessageBubble({ role, content, createdAt, className }: { role: 'user' |
               </Button>
             </div>
           ) : (
-            <p key={i} className="whitespace-pre-wrap text-sm">{seg.content}</p>
+            <p key={i} className="whitespace-pre-wrap text-[13px] leading-5">{seg.content}</p>
           )
         ))}
       </div>
@@ -298,9 +310,12 @@ function parseSegments(s: string): Array<{ type: 'text'; content: string } | { t
 function BackfillLogViewer({ text, wrap, follow, viewportRef }: { text: string; wrap: boolean; follow: boolean; viewportRef: React.RefObject<HTMLDivElement> }) {
   const [visible, setVisible] = useState<string>('')
   const timerRef = useRef<number | null>(null)
-  const linesRef = useRef<string[]>([])
+  const baseLinesRef = useRef<string[]>([])
   const idxRef = useRef<number>(0)
   const nearBottomRef = useRef<boolean>(true)
+  const initializedRef = useRef<boolean>(false)
+  const backfillingRef = useRef<boolean>(false)
+  const lastCountRef = useRef<number>(0)
 
   // Track whether the viewport is near bottom to gate auto-scroll
   useEffect(() => {
@@ -317,31 +332,52 @@ function BackfillLogViewer({ text, wrap, follow, viewportRef }: { text: string; 
   }, [viewportRef])
 
   useEffect(() => {
-    linesRef.current = text ? text.split(/\r?\n/) : []
-    idxRef.current = linesRef.current.length
-    setVisible('')
+    const nextLines = text ? text.split(/\r?\n/) : []
 
-    const chunk = Math.min(800, Math.max(200, Math.floor(linesRef.current.length / 20) || 400))
+    // If we haven't initialized or file shrank, do initial progressive backfill
+    const fileShrank = nextLines.length < lastCountRef.current
+    const needsInit = !initializedRef.current || fileShrank
+    if (needsInit) {
+      initializedRef.current = true
+      backfillingRef.current = true
+      baseLinesRef.current = nextLines
+      idxRef.current = nextLines.length
+      setVisible('')
+      const chunk = Math.min(800, Math.max(200, Math.floor(nextLines.length / 20) || 400))
+      const tick = () => {
+        const nextIdx = Math.max(0, idxRef.current - chunk)
+        const slice = baseLinesRef.current.slice(nextIdx, idxRef.current)
+        setVisible((prev) => (slice.length ? slice.join('\n') + (prev ? '\n' + prev : '') : prev))
+        idxRef.current = nextIdx
+        requestAnimationFrame(() => {
+          const viewport = viewportRef.current
+          if (follow && nearBottomRef.current && viewport) viewport.scrollTop = viewport.scrollHeight
+        })
+        if (idxRef.current > 0) {
+          timerRef.current = window.setTimeout(tick, 0)
+        } else {
+          backfillingRef.current = false
+          lastCountRef.current = baseLinesRef.current.length
+          timerRef.current = null
+        }
+      }
+      tick()
+      return () => { if (timerRef.current) { window.clearTimeout(timerRef.current); timerRef.current = null } }
+    }
 
-    const tick = () => {
-      const nextIdx = Math.max(0, idxRef.current - chunk)
-      const slice = linesRef.current.slice(nextIdx, idxRef.current)
-      setVisible((prev) => (slice.length ? slice.join('\n') + (prev ? '\n' + prev : '') : prev))
-      idxRef.current = nextIdx
-      // Keep the viewport pinned to bottom after DOM updates when following and near bottom
-      // Schedule post-render to avoid visible jumps
-      requestAnimationFrame(() => {
-        const viewport = viewportRef.current
-        if (follow && nearBottomRef.current && viewport) viewport.scrollTop = viewport.scrollHeight
-      })
-      if (idxRef.current > 0) {
-        timerRef.current = window.setTimeout(tick, 0)
-      } else {
-        timerRef.current = null
+    // If we've finished backfill and new lines were appended, append them without resetting
+    if (!backfillingRef.current) {
+      const prevCount = lastCountRef.current
+      if (nextLines.length > prevCount) {
+        const add = nextLines.slice(prevCount)
+        setVisible((prev) => (prev ? prev + '\n' + add.join('\n') : add.join('\n')))
+        lastCountRef.current = nextLines.length
+        requestAnimationFrame(() => {
+          const viewport = viewportRef.current
+          if (follow && nearBottomRef.current && viewport) viewport.scrollTop = viewport.scrollHeight
+        })
       }
     }
-    tick()
-    return () => { if (timerRef.current) { window.clearTimeout(timerRef.current); timerRef.current = null } }
   }, [text, follow])
 
   return (
