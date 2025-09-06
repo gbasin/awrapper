@@ -4,12 +4,16 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 
 Quickstart
 
-- Prereqs: Node.js 20+, Git, Codex CLI installed (`brew install codex` or `npm i -g @openai/codex`).
+- Prereqs: Node.js 22.x (LTS). This repo has an `.nvmrc` pinned to 22.19.0 — run `nvm use` (or `nvm install`) to match. Also install Git and Codex CLI (`brew install codex` or `npm i -g @openai/codex`).
 - Use pnpm: `pnpm install`
 - Run dev: `pnpm dev`
 - Build: `pnpm build`
 - Tests: `pnpm test`
 - Open: `http://127.0.0.1:8787`
+
+Troubleshooting
+
+- After switching Node versions (e.g., via `nvm use`), rebuild native deps. If you see a `NODE_MODULE_VERSION` error from `better-sqlite3`, run `pnpm rebuild better-sqlite3` (or `rm -rf node_modules && pnpm install`).
 
 Turbo
 

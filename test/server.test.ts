@@ -42,6 +42,8 @@ beforeAll(async () => {
 
   const { ensureDataDirs } = await import('../src/config.js');
   await ensureDataDirs();
+  const { ensureAgentsRegistry } = await import('../src/agents.js');
+  ensureAgentsRegistry();
   const { buildServer } = await import('../src/server.js');
   app = await buildServer({ listen: false });
 });
@@ -65,5 +67,23 @@ describe('sessions routes', () => {
     const json = res.json() as any;
     expect(typeof json.id).toBe('string');
     expect(json.id.length).toBeGreaterThan(8);
+  });
+
+  it('session HTML uses Accept: application/json in inline fetches', async () => {
+    // create a persistent session so the page renders the messaging UI
+    const create = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir, lifecycle: 'persistent' }, headers: { 'content-type': 'application/json' } });
+    expect(create.statusCode).toBe(200);
+    const { id } = create.json() as any;
+
+    // Request HTML explicitly like a browser would
+    const page = await app.inject({ method: 'GET', url: `/sessions/${id}`, headers: { 'accept': 'text/html' } });
+    expect(page.statusCode).toBe(200);
+    const html = page.body as string;
+    expect(html).toContain('<!doctype html>');
+    // Guard that client-side fetch forces JSON Accept header to avoid negotiation issues
+    expect(html).toContain("fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })");
+    expect(html).toContain("fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } })");
+    // Guard that polling failures are contained and do not break event wiring
+    expect(html).toContain('poll().catch(() => {})');
   });
 });
