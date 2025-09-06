@@ -54,7 +54,7 @@ afterAll(async () => {
 
 describe('sessions routes', () => {
   it('accepts application/x-www-form-urlencoded and redirects', async () => {
-    const body = new URLSearchParams({ repo_path: repoDir, lifecycle: 'oneshot', initial_message: 'hello' }).toString();
+    const body = new URLSearchParams({ repo_path: repoDir, initial_message: 'hello' }).toString();
     const res = await app.inject({ method: 'POST', url: '/sessions', payload: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
     expect(res.statusCode).toBe(303);
     const loc = res.headers['location'] as string;
@@ -62,7 +62,7 @@ describe('sessions routes', () => {
   });
 
   it('accepts application/json and returns id', async () => {
-    const res = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir, lifecycle: 'oneshot', initial_message: 'hi' }, headers: { 'content-type': 'application/json' } });
+    const res = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir, initial_message: 'hi' }, headers: { 'content-type': 'application/json' } });
     expect(res.statusCode).toBe(200);
     const json = res.json() as any;
     expect(typeof json.id).toBe('string');
@@ -70,8 +70,8 @@ describe('sessions routes', () => {
   });
 
   it('session HTML uses Accept: application/json in inline fetches', async () => {
-    // create a persistent session so the page renders the messaging UI
-    const create = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir, lifecycle: 'persistent' }, headers: { 'content-type': 'application/json' } });
+    // create a session so the page renders the messaging UI
+    const create = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir }, headers: { 'content-type': 'application/json' } });
     expect(create.statusCode).toBe(200);
     const { id } = create.json() as any;
 

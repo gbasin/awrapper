@@ -120,31 +120,47 @@ export class CodexProtoSession {
   }
 
   async awaitTaskComplete(runId: string, timeoutMs = 5 * 60_000) {
+    // Treat timeoutMs as an inactivity timeout: any event for this run resets the clock.
     let acc = '';
     return new Promise<string>((resolve, reject) => {
+      let timer: NodeJS.Timeout | null = null;
+      const reset = () => {
+        if (timeoutMs <= 0) return; // 0 (or negative) disables inactivity timeout
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          off();
+          reject(new Error('timeout'));
+        }, timeoutMs);
+      };
+
       const off = this.onEvent((ev) => {
         if (ev.id !== runId) return;
         const t = ev.msg?.type;
         if (t === 'agent_message' && typeof ev.msg?.message === 'string') {
           acc += (acc ? '\n' : '') + ev.msg.message;
+          reset();
         } else if (t === 'task_complete') {
           off();
+          if (timer) clearTimeout(timer);
           resolve(acc);
         } else if (t === 'error') {
           off();
+          if (timer) clearTimeout(timer);
           reject(new Error(String(ev.msg?.message || 'error')));
+        } else {
+          // Any other event for this run indicates activity; reset inactivity timer
+          reset();
         }
       });
-      const to = setTimeout(() => {
-        off();
-        reject(new Error('timeout'));
-      }, timeoutMs);
-      // Clear timeout on resolve/reject via wrapping
+
+      // Arm the initial inactivity timer
+      reset();
+
+      // Clear timeout on resolve/reject via wrapping as a final safeguard
       const wrap = (fn: any) => (v: any) => {
-        clearTimeout(to);
+        if (timer) clearTimeout(timer);
         fn(v);
       };
-      // Monkey patch resolve/reject to clear timeout
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (resolve as any) = wrap(resolve);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

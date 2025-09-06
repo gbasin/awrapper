@@ -54,38 +54,4 @@ describe('integration: proto with cwd and handshake', () => {
   });
 });
 
-describe('integration: oneshot exec writes last message and uses cwd', () => {
-  it('exec writes last-message.txt and runs in cwd', async () => {
-    const { spawnOneshotCodex } = await import('../src/sessionProc.ts');
-
-    const worktree = await fs.mkdtemp(path.join(os.tmpdir(), 'awrapper-wt1-'));
-    const prompt = 'ping';
-    const { proc, artifactDir, logPath } = await spawnOneshotCodex({ worktree, prompt });
-    if (!proc) throw new Error('no process');
-
-    await proc; // wait for completion
-
-    const realWorktree = await fs.realpath(worktree);
-    const log = await fs.readFile(logPath, 'utf8').catch(() => '');
-    expect(log).toContain(`CWD:${realWorktree}`);
-    const expectedLast = path.join(artifactDir, 'last-message.txt');
-    // Inspect ARGS dumped by fake codex to ensure flag is present
-    const argsLine = (log.split('\n').find((l) => l.startsWith('ARGS:')) || 'ARGS:[]').slice(5);
-    let parsedArgs: string[] = [];
-    try { parsedArgs = JSON.parse(argsLine); } catch {}
-    expect(parsedArgs).toContain('--output-last-message');
-    const idx = parsedArgs.indexOf('--output-last-message');
-    expect(parsedArgs[idx + 1]).toBe(expectedLast);
-    // Wait briefly for the file to appear in case of FS lag
-    for (let i = 0; i < 25; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      if (await fs.pathExists(expectedLast)) break;
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    const content = await fs.readFile(expectedLast, 'utf8');
-    expect(content).toContain('Echo: ping');
-
-    // already asserted cwd via log above
-  });
-});
+// oneshot mode removed; persistent-only

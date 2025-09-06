@@ -9,7 +9,7 @@ import path from 'node:path';
 import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
-import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
+import { spawnPersistentCodex } from './sessionProc.js';
 import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
@@ -58,175 +58,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     reply.header('Cache-Control', 'public, max-age=86400').type('image/png').send(png1x1);
   });
 
-  // SSR homepage has been replaced by SPA at '/'; keep legacy HTML available under '/__legacy' temporarily
-  app.get('/__legacy', async (_req, reply) => {
-    const db = getDb();
-    const sessions = db.prepare('select id, agent_id, lifecycle, status, repo_path, branch, started_at, last_activity_at, pid from sessions order by started_at desc limit 50').all() as any[];
-    const sessions2 = sessions.map((s) => ({ ...s, status: computeDisplayStatus(s) }));
-    const rows = sessions2
-      .map((s) => `<tr>
-          <td><a href="/sessions/${s.id}">${s.id}</a></td>
-          <td>${escapeHtml(s.agent_id)}</td>
-          <td>${escapeHtml(s.lifecycle)}</td>
-          <td>${escapeHtml(s.status)}</td>
-          <td class="muted">${escapeHtml(s.repo_path)}${s.branch ? ' @ ' + escapeHtml(s.branch) : ''}</td>
-        </tr>`)
-      .join('');
-    // Build a datalist of recent repo paths for quick selection
-    const seen = new Set<string>();
-    const recentRepos = sessions
-      .map((s) => s.repo_path as string)
-      .filter((p) => {
-        if (!p || seen.has(p)) return false;
-        seen.add(p);
-        return true;
-      })
-      .slice(0, 10);
-
-    const page = layout(
-      'awrapper',
-      `
-      <h1>Sessions</h1>
-      <form method="post" action="/sessions" style="margin-bottom: 16px">
-        <div class="row">
-          <input id="repo_path" name="repo_path" list="recent-repos" placeholder="/path/to/repo" size="40" required />
-          <datalist id="recent-repos">
-            ${recentRepos.map((p) => `<option value="${escapeHtml(p)}"></option>`).join('')}
-          </datalist>
-          <button type="button" id="browseBtn">Browse…</button>
-          <input name="branch" placeholder="branch (optional)" />
-          <select name="lifecycle">
-            <option value="persistent" selected>persistent (default)</option>
-            <option value="oneshot">oneshot</option>
-          </select>
-        </div>
-        <div id="browser" class="mono" style="display:none; border: 1px solid #eee; padding: 8px; margin-top: 8px; border-radius: 6px; max-height: 320px; overflow: auto;"></div>
-        <div style="margin-top:8px">
-          <textarea name="initial_message" placeholder="Initial message (optional)"></textarea>
-        </div>
-        <div style="margin-top:8px">
-          <button type="submit">Create session</button>
-        </div>
-      </form>
-      <table>
-        <tr><th>id</th><th>agent</th><th>lifecycle</th><th>status</th><th>repo</th></tr>
-        ${rows}
-      </table>
-      <script>
-        // Persist the last used repo path locally for convenience
-        (function() {
-          try {
-            var input = document.getElementById('repo_path');
-            if (!input) return;
-            var KEY = 'awrapper:lastRepoPath';
-            var saved = localStorage.getItem(KEY);
-            if (saved && !input.value) input.value = saved;
-            input.addEventListener('change', function() { localStorage.setItem(KEY, input.value); });
-            var form = input.closest('form');
-            if (form) form.addEventListener('submit', function() { localStorage.setItem(KEY, input.value); });
-          } catch (_) {}
-        })();
-
-        // Simple server-driven directory browser
-        (function() {
-          var btn = document.getElementById('browseBtn');
-          var box = document.getElementById('browser');
-          var input = document.getElementById('repo_path');
-          if (!btn || !box || !input) return;
-          var currentPath = null;
-          var currentData = null; // last payload from /browse
-          var onlyGit = (function(){ try { return localStorage.getItem('awrapper:browseOnlyGit') !== '0'; } catch(_) { return true; } })();
-
-          function escapeHtml(s) {
-            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
-          }
-
-          function renderRoots(data) {
-            var html = '<div style="display:flex; justify-content: space-between; align-items: center">'
-              + '<b>Select a directory</b>'
-              + '<button type="button" id="closeBrowser">Close</button>'
-              + '</div>';
-            html += '<div style="margin-top:6px">Roots:</div><ul>';
-            for (var i=0;i<data.roots.length;i++) {
-              var r = data.roots[i];
-              html += '<li><a href="#" data-path="' + encodeURIComponent(r.path) + '" class="nav">' + escapeHtml(r.label || r.path) + '</a></li>';
-            }
-            html += '</ul>';
-            box.innerHTML = html;
-            wireEvents();
-          }
-
-          function renderListing(data) {
-            currentPath = data.path || null;
-            currentData = data;
-            var html = '<div style="display:flex; justify-content: space-between; align-items: center">'
-              + '<div>Path: <span class="muted">' + escapeHtml(data.path) + '</span></div>'
-              + '<div>'
-              + '<label style="margin-right:8px; font-weight:normal"><input type="checkbox" id="onlyGitToggle" ' + (onlyGit ? 'checked' : '') + '> Only Git repos</label>'
-              + '<button type="button" id="selectHere">Use this directory</button> '
-              + '<button type="button" id="closeBrowser">Close</button>'
-              + '</div>'
-              + '</div>';
-            html += '<div style="margin-top:6px">';
-            if (data.parent) {
-              html += '<a href="#" data-path="' + encodeURIComponent(data.parent) + '" class="nav">↑ Up</a>';
-            } else {
-              html += '<a href="#" class="nav-roots">Roots</a>';
-            }
-            html += '</div>';
-            var entries = data.entries || [];
-            if (onlyGit) entries = entries.filter(function(e){ return !!e.is_repo; });
-            html += '<ul style="margin-top:6px">';
-            for (var i=0;i<entries.length;i++) {
-              var e = entries[i];
-              var label = e.name + (e.is_repo ? ' • git' : '');
-              html += '<li><a href="#" data-path="' + encodeURIComponent(e.path) + '" class="nav">' + escapeHtml(label) + '</a>'
-                + ' <button type="button" class="sel" data-path="' + encodeURIComponent(e.path) + '">Select</button>'
-                + '</li>';
-            }
-            html += '</ul>';
-            if (entries.length === 0) {
-              html += '<div class="muted">No git repos here.</div>';
-            }
-            box.innerHTML = html;
-            wireEvents();
-            var selHere = document.getElementById('selectHere');
-            if (selHere) selHere.addEventListener('click', function() { input.value = data.path; box.style.display='none'; });
-            var tog = document.getElementById('onlyGitToggle');
-            if (tog) tog.addEventListener('change', function(){ onlyGit = this.checked; try { localStorage.setItem('awrapper:browseOnlyGit', onlyGit ? '1' : '0'); } catch(_){}; renderListing(currentData); });
-          }
-
-          async function load(path) {
-            var url = '/browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
-            var res = await fetch(url);
-            var data = await res.json();
-            if (data.roots) { currentData = data; renderRoots(data); } else { renderListing(data); }
-          }
-
-          function wireEvents() {
-            var close = document.getElementById('closeBrowser');
-            if (close) close.addEventListener('click', function(){ box.style.display='none'; });
-            var navs = box.querySelectorAll('a.nav');
-            for (var i=0;i<navs.length;i++) {
-              navs[i].addEventListener('click', function(ev){ ev.preventDefault(); var p = this.getAttribute('data-path'); if(p) load(decodeURIComponent(p)); });
-            }
-            var roots = box.querySelectorAll('a.nav-roots');
-            for (var i=0;i<roots.length;i++) {
-              roots[i].addEventListener('click', function(ev){ ev.preventDefault(); load(null); });
-            }
-            var sels = box.querySelectorAll('button.sel');
-            for (var i=0;i<sels.length;i++) {
-              sels[i].addEventListener('click', function(){ var p = this.getAttribute('data-path'); if (p) { input.value = decodeURIComponent(p); box.style.display='none'; } });
-            }
-          }
-
-          btn.addEventListener('click', function(){ box.style.display = (box.style.display === 'none' ? 'block' : 'none'); if (box.style.display === 'block') load(null); });
-        })();
-      </script>
-      `
-    );
-    reply.type('text/html').send(page);
-  });
+  // Legacy HTML index at /__legacy removed
 
   // Directory browsing API for server-side picker
   app.get('/browse', async (req, reply) => {
@@ -286,9 +118,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const agent_id = body.agent_id || 'codex';
     const repo_path = expandPath(body.repo_path as string);
     const branch = body.branch as string | undefined;
-    const lifecycle: 'oneshot' | 'persistent' = body.lifecycle || 'persistent';
     const initial_message = body.initial_message as string | undefined;
-    app.log.info({ agent_id, lifecycle, repo_path, branch, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
+    app.log.info({ agent_id, repo_path, branch, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
     if (!(await isGitRepo(repo_path))) return reply.code(400).send({ error: 'repo_path is not a Git repo' });
     const db = getDb();
@@ -298,35 +129,11 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const { logPath, artifactDir } = await (await import('./sessionProc.js')).setupPaths(id);
     const now = Date.now();
     db.prepare(
-      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, lifecycle, status, started_at, log_path, agent_log_hint, artifact_dir)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, agent_id, repo_path, branch || null, worktree_path, lifecycle, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir);
+      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, status, started_at, log_path, agent_log_hint, artifact_dir)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir);
 
-    // Spawn according to lifecycle
-    if (lifecycle === 'oneshot') {
-      // Default prompt if none provided
-      const prompt = initial_message?.trim() || 'Start';
-      db.prepare('update sessions set status = ? where id = ?').run('running', id);
-      const { proc } = await spawnOneshotCodex({ worktree: worktree_path, prompt });
-      procs.set(id, proc!);
-      proc!.once('exit', async (code: number | null) => {
-        const db2 = getDb();
-        db2.prepare('update sessions set status = ?, exit_code = ?, closed_at = ?, pid = NULL where id = ?')
-          .run('closed', code ?? null, Date.now(), id);
-        procs.delete(id);
-
-        // Try to persist last message if present
-        try {
-          const lastPath = `${artifactDir}/last-message.txt`;
-          if (await fs.pathExists(lastPath)) {
-            const content = await fs.readFile(lastPath, 'utf8');
-            const msgId = crypto.randomUUID();
-            db2.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
-              .run(msgId, id, null, 'assistant', content, Date.now());
-          }
-        } catch {}
-      });
-    } else {
+    {
       db.prepare('update sessions set status = ? where id = ?').run('starting', id);
       const { proc } = await spawnPersistentCodex({ worktree: worktree_path });
       db.prepare('update sessions set status = ?, pid = ? where id = ?').run('running', proc!.pid, id);
@@ -413,12 +220,12 @@ export async function buildServer(opts?: { listen?: boolean }) {
         `
         <p><a href="/">← back</a></p>
         <h2>Session ${id}</h2>
-        <p>agent: <b>${row.agent_id}</b> • lifecycle: <b>${row.lifecycle}</b> • status: <b>${row.status}</b></p>
+        <p>agent: <b>${row.agent_id}</b> • status: <b>${row.status}</b></p>
         <p class="muted">repo: ${escapeHtml(row.repo_path)}${row.branch ? ' @ ' + escapeHtml(row.branch) : ''}</p>
         <div class="row">
           <form id="msgform">
-            <textarea id="msg" placeholder="Type message" ${row.lifecycle === 'persistent' ? '' : 'disabled'}></textarea>
-            <div><button type="submit" ${row.lifecycle === 'persistent' ? '' : 'disabled'}>Send</button></div>
+            <textarea id="msg" placeholder="Type message"></textarea>
+            <div><button type="submit">Send</button></div>
           </form>
           <form method="post" action="/sessions/${id}/cancel"><button>Cancel</button></form>
         </div>
@@ -575,7 +382,6 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const db = getDb();
     const s = db.prepare('select * from sessions where id = ?').get(id) as Session | undefined;
     if (!s) return reply.code(404).send({ error: 'not found' });
-    if (s.lifecycle !== 'persistent') return reply.code(400).send({ error: 'messages only valid for persistent sessions' });
     if (!acquireLock(id)) return reply.code(409).send({ error: 'turn in flight' });
     try {
       let proto = protoSessions.get(id);
@@ -793,12 +599,10 @@ function isPidAlive(pid?: number | null): boolean {
   }
 }
 
-// Compute a user-facing status. If a persistent session says 'running' but the
-// PID is not alive (e.g., server restarted or process exited), mark it 'stale'.
-function computeDisplayStatus(row: { status: string; pid?: number | null; lifecycle?: string }): string {
-  const s = String(row?.status || '');
-  const lc = String(row?.lifecycle || '');
-  if (lc === 'persistent') {
+  // Compute a user-facing status. If a session says 'running' but the
+  // PID is not alive (e.g., server restarted or process exited), mark it 'stale'.
+  function computeDisplayStatus(row: { status: string; pid?: number | null }): string {
+    const s = String(row?.status || '');
     if (s === 'running') {
       return isPidAlive(row.pid) ? 'running' : 'stale';
     }
@@ -806,6 +610,5 @@ function computeDisplayStatus(row: { status: string; pid?: number | null; lifecy
       // If there's no living PID for a long-starting session, surface as stale
       return isPidAlive(row.pid) ? 'starting' : 'stale';
     }
+    return s;
   }
-  return s;
-}

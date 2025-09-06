@@ -1,7 +1,6 @@
 export type Session = {
   id: string
   agent_id: string
-  lifecycle: 'oneshot' | 'persistent'
   status: string
   repo_path: string
   branch: string | null
@@ -27,7 +26,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
-  createSession: async (body: { repo_path: string; branch?: string; lifecycle?: 'oneshot' | 'persistent'; initial_message?: string }) => {
+  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

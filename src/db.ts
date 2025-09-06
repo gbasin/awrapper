@@ -13,6 +13,7 @@ export function getDb() {
 }
 
 function migrate(db: Database.Database) {
+  // Ensure base tables exist with current schema
   db.exec(`
     create table if not exists agents (
       id text primary key,
@@ -29,7 +30,6 @@ function migrate(db: Database.Database) {
       repo_path text not null,
       branch text,
       worktree_path text not null,
-      lifecycle text not null,
       status text not null,
       pid integer,
       started_at integer not null,
@@ -55,6 +55,46 @@ function migrate(db: Database.Database) {
 
     create index if not exists idx_messages_session_created on messages(session_id, created_at);
   `);
+
+  // Migrate legacy sessions table that included a 'lifecycle' column → drop it.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    const hasLifecycle = cols.some((c) => c.name === 'lifecycle');
+    if (hasLifecycle) {
+      db.exec('BEGIN');
+      db.exec(`
+        create table if not exists sessions_new (
+          id text primary key,
+          agent_id text not null,
+          repo_path text not null,
+          branch text,
+          worktree_path text not null,
+          status text not null,
+          pid integer,
+          started_at integer not null,
+          last_activity_at integer,
+          closed_at integer,
+          exit_code integer,
+          log_path text not null,
+          error_message text,
+          agent_log_hint text,
+          artifact_dir text,
+          foreign key(agent_id) references agents(id)
+        );
+      `);
+      db.exec(`
+        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir)
+        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir
+        from sessions;
+      `);
+      db.exec('drop table sessions');
+      db.exec('alter table sessions_new rename to sessions');
+      db.exec('COMMIT');
+    }
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch {}
+    // swallow; best-effort migration
+  }
 }
 
 export type Agent = {
@@ -72,7 +112,6 @@ export type Session = {
   repo_path: string;
   branch?: string | null;
   worktree_path: string;
-  lifecycle: 'oneshot' | 'persistent';
   status: string;
   pid?: number | null;
   started_at: number;
@@ -93,4 +132,3 @@ export type Message = {
   content: string;
   created_at: number;
 };
-

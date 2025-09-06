@@ -43,14 +43,13 @@ describe('awrapper core flow', () => {
     try { await app?.close(); } catch {}
   });
 
-  it('creates and completes a oneshot session', async () => {
+  it('creates a session and processes an initial message', async () => {
     const repo = await makeTempGitRepo();
     const res = await app.inject({
       method: 'POST',
       url: '/sessions',
       payload: {
         repo_path: repo,
-        lifecycle: 'oneshot',
         initial_message: 'do it'
       }
     });
@@ -58,33 +57,21 @@ describe('awrapper core flow', () => {
     const { id } = res.json();
     expect(id).toBeTruthy();
 
-    // Poll until closed
-    let closed = false;
+    // Fetch messages and find assistant reply from bootstrap turn
+    let got = '';
     for (let i = 0; i < 40; i++) {
-      const r2 = await app.inject({ method: 'GET', url: `/sessions/${id}` });
-      const j2 = r2.json();
-      if (j2.status === 'closed') { closed = true; break; }
+      const list = await app.inject({ method: 'GET', url: `/sessions/${id}/messages` });
+      const arr = list.json();
+      const assts = arr.filter((m: any) => m.role === 'assistant');
+      if (assts.length) { got = assts[assts.length - 1].content; break; }
       await new Promise((r) => setTimeout(r, 100));
     }
-    expect(closed).toBe(true);
-
-    const r3 = await app.inject({ method: 'GET', url: `/sessions/${id}` });
-    const j3 = r3.json();
-    // assistant message appended from last-message file
-    const asst = (j3.messages || []).find((m: any) => m.role === 'assistant');
-    expect(asst?.content).toContain('stub-output: do it');
+    expect(got).toContain('Echo: do it');
   });
 
   it('supports persistent session messaging via proto', async () => {
     const repo = await makeTempGitRepo();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/sessions',
-      payload: {
-        repo_path: repo,
-        lifecycle: 'persistent'
-      }
-    });
+    const res = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repo } });
     expect(res.statusCode).toBe(200);
     const { id } = res.json();
     expect(id).toBeTruthy();
@@ -112,14 +99,7 @@ describe('awrapper core flow', () => {
 
   it('enforces one in-flight turn with 409', async () => {
     const repo = await makeTempGitRepo();
-    const res = await app.inject({
-      method: 'POST',
-      url: '/sessions',
-      payload: {
-        repo_path: repo,
-        lifecycle: 'persistent'
-      }
-    });
+    const res = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repo } });
     const { id } = res.json();
 
     // Fire two requests almost at once; second should 409 because stub delays ~150ms

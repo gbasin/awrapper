@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Table, Tbody, Th, Thead, Tr, Td } from '../components/ui/table'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
-import { Select } from '../components/ui/select'
 import { Textarea } from '../components/ui/textarea'
 import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
@@ -17,9 +16,13 @@ export default function Home() {
   const qc = useQueryClient()
   const nav = useNavigate()
   const q = useQuery({ queryKey: ['sessions'], queryFn: () => api.listSessions(), staleTime: 5000 })
-  const [repo, setRepo] = useState('')
-  const [branch, setBranch] = useState('')
-  const [lifecycle, setLifecycle] = useState<'persistent' | 'oneshot'>('persistent')
+  const [repo, setRepo] = useState(() => {
+    try { return localStorage.getItem('awrapper:lastRepoPath') || '' } catch { return '' }
+  })
+  const [branch, setBranch] = useState(() => {
+    try { return localStorage.getItem('awrapper:lastBranch') || '' } catch { return '' }
+  })
+  // lifecycle removed; all sessions are persistent
   const [initial, setInitial] = useState('')
   const m = useMutation({
     mutationFn: api.createSession,
@@ -58,18 +61,35 @@ export default function Home() {
             className="grid gap-2 sm:grid-cols-2 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault()
-              m.mutate({ repo_path: repo, branch: branch || undefined, lifecycle, initial_message: initial || undefined })
+              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined })
             }}
           >
             <div className="flex items-center gap-2">
-              <Input required placeholder="/path/to/repo" value={repo} onChange={(e) => setRepo(e.target.value)} />
-              <BrowseDialog onSelect={(p) => { setRepo(p); }} />
+              <Input
+                required
+                placeholder="/path/to/repo"
+                value={repo}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setRepo(v)
+                  try { localStorage.setItem('awrapper:lastRepoPath', v) } catch {}
+                }}
+              />
+              <BrowseDialog onSelect={(p) => {
+                setRepo(p)
+                try { localStorage.setItem('awrapper:lastRepoPath', p) } catch {}
+              }} />
             </div>
-            <Input placeholder="branch (optional)" value={branch} onChange={(e) => setBranch(e.target.value)} />
-            <Select value={lifecycle} onChange={(e) => setLifecycle(e.target.value as any)}>
-              <option value="persistent">persistent (default)</option>
-              <option value="oneshot">oneshot</option>
-            </Select>
+            <Input
+              placeholder="branch (optional)"
+              value={branch}
+              onChange={(e) => {
+                const v = e.target.value
+                setBranch(v)
+                try { localStorage.setItem('awrapper:lastBranch', v) } catch {}
+              }}
+            />
+            {/* lifecycle selection removed: always persistent */}
             <Textarea placeholder="Initial message (optional)" value={initial} onChange={(e) => setInitial(e.target.value)} className="sm:col-span-2 md:col-span-3" />
             <div className="sm:col-span-2 md:col-span-3">
               <Button type="submit" disabled={m.isPending}>{m.isPending ? 'Creating…' : 'Create session'}</Button>
@@ -90,7 +110,6 @@ function SessionsTable({ rows }: { rows: Session[] }) {
           <Tr>
             <Th>id</Th>
             <Th>agent</Th>
-            <Th>lifecycle</Th>
             <Th>status</Th>
             <Th>repo</Th>
           </Tr>
@@ -104,7 +123,6 @@ function SessionsTable({ rows }: { rows: Session[] }) {
                 </Link>
               </Td>
               <Td>{s.agent_id}</Td>
-              <Td>{s.lifecycle}</Td>
               <Td>
                 <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
                   {s.status}

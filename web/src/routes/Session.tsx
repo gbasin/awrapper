@@ -52,7 +52,7 @@ export default function Session() {
           <CardTitle className="flex items-center gap-3">
             <span className="truncate">{s.id}</span>
             <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
-              {s.lifecycle} • {s.status}
+              {s.status}
             </Badge>
           </CardTitle>
           <div className="px-4 text-sm text-slate-500">{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</div>

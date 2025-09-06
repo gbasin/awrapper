@@ -1,6 +1,6 @@
 # awrapper
 
-Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single-process Fastify server, SQLite persistence, and a unified Sessions model with oneshot and persistent lifecycles.
+Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single-process Fastify server, SQLite persistence, and a unified Sessions model. All sessions are persistent.
 
 # Quickstart
 
@@ -13,7 +13,7 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 
 # Notes
 
-- Default lifecycle is `persistent`; multi-turn messaging is implemented via `codex proto` with a simple JSONL protocol. One in-flight user turn per session is enforced.
+- Sessions are persistent; multi-turn messaging is implemented via `codex proto` with a simple JSONL protocol. One in-flight user turn per session is enforced.
 - Data lives under `~/.awrapper` (DB, logs, artifacts). Worktrees are created under `<repo>/.awrapper-worktrees/<session_id>` and are not auto-cleaned.
 
 ## Debugging
@@ -33,7 +33,7 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - `CODEX_BIN`: path to `codex` binary if not on PATH.
 - `OPENAI_API_KEY`: required for Codex to call OpenAI.
 - `AWRAPPER_DEBUG`/`DEBUG`: enable verbose server logs and client debug integration.
-- `AWRAPPER_TURN_TIMEOUT_SECS` (or `TURN_TIMEOUT_SECS`): max seconds the server waits for a single user turn in persistent sessions before timing out (default 600 seconds).
+- `AWRAPPER_TURN_TIMEOUT_SECS` (or `TURN_TIMEOUT_SECS`): inactivity timeout for a single user turn in persistent sessions. The timer resets on any agent event (reasoning/message/tool/etc). Default 600 seconds. Set to `0` to disable.
 
 ### Web dev proxy
 
@@ -43,6 +43,5 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 
 ## How sessions work
 
-- Oneshot: spawns `codex exec --json`, captures and stores the last assistant message on exit.
 - Persistent: spawns `codex -a=never proto` and streams through a minimal JSONL protocol. One user turn at a time is enforced.
-- Initial message: for persistent sessions, if you provide an Initial message on creation, awrapper sends it immediately and persists both user and assistant messages so the transcript updates right away.
+- Initial message: if you provide an Initial message on creation, awrapper sends it immediately and persists both user and assistant messages so the transcript updates right away.
