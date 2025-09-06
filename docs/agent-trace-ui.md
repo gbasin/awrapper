@@ -24,7 +24,7 @@ Note: parsed_cmd inside exec_command_begin.msg.parsed_cmd carries typed intents 
 - All events for that turn share id === turn_id. task_started begins that run; task_complete ends it.
 - If task_started is missing, the UI can fall back to grouping by the last event id (mirrors current non‑SPA behavior).
 
-## UI Proposal (No‑Preview Principle)
+## UI Proposal
 
 Inline, per‑message timeline. Default collapsed; each item shows exactly one concise summary line. Expanding an item reveals the full content (not truncated) in a scrollable, formatted code box where applicable.
 
@@ -129,6 +129,19 @@ export type ToolCall = {
     - search → `search — <query>` (append `in <path>` if present)
     - unknown → `exec — <command>`
   - Append result metadata once known: `(exit <code> • <duration> • <lines> lines)` using `exec_command_end` fields and line count from `formatted_output`.
+
+### Parsed‑Cmd → Label Mapping
+
+| parsed_cmd.type | Fields used                                  | Collapsed label pattern                               | Example (from logs) |
+|-----------------|-----------------------------------------------|-------------------------------------------------------|---------------------|
+| read            | `name` or inferred from `cmd`                 | `Tool • read — <name>`                                | `sed -n '1,200p' README.md` → `Tool • read — README.md` |
+| list_files      | `path`                                        | `Tool • list files — <path>`                          | `ls -la src` → `Tool • list files — src` |
+| search          | `query`, `path`                               | `Tool • search — '<query>' in <path>`; if no query: `Tool • search — in <path>` | `rg --files src` → `Tool • search — in src` |
+| unknown         | raw `cmd`                                     | `Tool • exec — <command>` (ellipsize long commands)   | `head -n 200` → `Tool • exec — head -n 200` |
+
+Chain selection rules:
+- Primary intent: pick the first parsed_cmd entry whose type is in {read, list_files, search}. If none, use the first entry, labeled as `exec`.
+- If additional commands exist in the chain, append ` +N cmds` to the collapsed label (e.g., `Tool • list files — src +2 cmds`). Expanded view shows the full shell pipeline and output.
 
 - Assistant drafts/final
   - Draft: always `Draft response (N chars)` without content preview.
