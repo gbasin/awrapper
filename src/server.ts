@@ -32,6 +32,14 @@ export async function buildServer(opts?: { listen?: boolean }) {
         prefix: '/',
         index: ['index.html'],
         decorateReply: false,
+        // Help avoid stale SPA shells by preventing index.html from being cached
+        setHeaders: (res: any, filePath: string) => {
+          try {
+            if (filePath && filePath.endsWith(path.sep + 'index.html')) {
+              res.setHeader('Cache-Control', 'no-store');
+            }
+          } catch {}
+        },
       } as any);
       app.log.info({ webDist }, 'Static SPA enabled');
     } else {
