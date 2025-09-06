@@ -392,39 +392,38 @@ export async function buildServer(opts?: { listen?: boolean }) {
         <h3>Log</h3>
         <div id="log" class="log mono"></div>
         <script>
-          const id = ${JSON.stringify(id)};
-          const DEBUG = ${JSON.stringify(!!debug)};
-          function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
-          function dbgPost(evt, extra){ if(!DEBUG) return; try{ navigator.sendBeacon('/client-log', JSON.stringify({ evt, id, t: Date.now(), ...extra })); } catch(_){} }
-          async function poll() {
-            // Explicitly request JSON to avoid content-negotiation returning HTML
-            dbg('poll: start'); dbgPost('poll-start');
-            const res = await fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } });
-            const data = await res.json();
-            dbg('poll: session ok', data && data.id);
-            const msgsRes = await fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } });
-            const msgs = await msgsRes.json();
-            dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs);
-            document.getElementById('msgs').textContent = msgs.map(m => '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content).join('\n');
-            const logRes = await fetch('/sessions/' + id + '/log?tail=500');
-            const logText = await logRes.text();
-            dbg('poll: log bytes', logText.length);
-            document.getElementById('log').textContent = logText;
-            dbg('poll: done'); dbgPost('poll-done');
-          }
-          setInterval(() => { poll().catch((e) => { dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); }); }, 500);
-          poll().catch((e) => { dbg('first poll error', e && e.message); dbgPost('first-poll-error', { message: String(e && e.message) }); });
+          (function(){
+            var id = ${JSON.stringify(id)};
+            var DEBUG = ${JSON.stringify(!!debug)};
+            function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
+            function assign(t, s){ if(!s) return t; for (var k in s){ if(Object.prototype.hasOwnProperty.call(s,k)) t[k]=s[k]; } return t; }
+            function dbgPost(evt, extra){ if(!DEBUG) return; try{ var payload = assign({ evt: evt, id: id, t: Date.now() }, extra || {}); navigator.sendBeacon('/client-log', JSON.stringify(payload)); } catch(_){} }
+            function poll(){
+              dbg('poll: start'); dbgPost('poll-start');
+              return fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
+                .then(function(res){ return res.json(); })
+                .then(function(data){ dbg('poll: session ok', data && data.id); return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } }); })
+                .then(function(res){ return res.json(); })
+                .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); document.getElementById('msgs').textContent = msgs.map(function(m){ return '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; }).join('\n'); return fetch('/sessions/' + id + '/log?tail=500'); })
+                .then(function(res){ return res.text(); })
+                .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; dbg('poll: done'); dbgPost('poll-done'); })
+                .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
+            }
+            setInterval(function(){ poll(); }, 500);
+            poll();
 
-          document.getElementById('msgform').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const content = document.getElementById('msg').value;
-            if (!content.trim()) return;
-            dbg('submit: sending'); dbgPost('submit');
-            await fetch('/sessions/' + id + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ content }) });
-            document.getElementById('msg').value='';
-            dbg('submit: sent');
-          });
-          window.addEventListener('error', function(ev){ dbg('window error', ev && ev.message); dbgPost('window-error', { message: String(ev && ev.message) }); });
+            var form = document.getElementById('msgform');
+            if (form) form.addEventListener('submit', function(e){
+              e.preventDefault();
+              var content = document.getElementById('msg').value;
+              if (!content || !content.trim()) return;
+              dbg('submit: sending'); dbgPost('submit');
+              fetch('/sessions/' + id + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ content: content }) })
+                .then(function(){ document.getElementById('msg').value=''; dbg('submit: sent'); })
+                .catch(function(e){ dbg('submit error', e && e.message); dbgPost('submit-error', { message: String(e && e.message) }); });
+            });
+            window.addEventListener('error', function(ev){ dbg('window error', ev && ev.message); dbgPost('window-error', { message: String(ev && ev.message) }); });
+          })();
         </script>
         `
       );
