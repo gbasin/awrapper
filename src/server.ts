@@ -9,7 +9,7 @@ import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
@@ -257,6 +257,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const branch = body.branch as string | undefined;
     const lifecycle: 'oneshot' | 'persistent' = body.lifecycle || 'persistent';
     const initial_message = body.initial_message as string | undefined;
+    app.log.info({ agent_id, lifecycle, repo_path, branch, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
     if (!(await isGitRepo(repo_path))) return reply.code(400).send({ error: 'repo_path is not a Git repo' });
     const db = getDb();
@@ -303,6 +304,41 @@ export async function buildServer(opts?: { listen?: boolean }) {
       const proto = new CodexProtoSession(proc!);
       protoSessions.set(id, proto);
       try { await proto.configureSession(worktree_path); } catch {}
+      // If an initial message was provided for a persistent session,
+      // send it asynchronously and persist both sides of the turn.
+      if (initial_message && String(initial_message).trim()) {
+        const text = String(initial_message).trim();
+        (async () => {
+          // Acquire a turn lock to avoid racing with immediate user input
+          const got = acquireLock(id);
+          try {
+            const db4 = getDb();
+            const turnId = crypto.randomUUID();
+            const now = Date.now();
+            const userMsgId = crypto.randomUUID();
+            if (DEBUG) app.log.info({ id, turnId }, 'Bootstrap turn: sending initial user message');
+            db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+              .run(userMsgId, id, turnId, 'user', text, now);
+            db4.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
+
+            const runId = proto.sendUserInput(text, turnId);
+            let assistantContent = '';
+            try {
+              assistantContent = await proto.awaitTaskComplete(runId, 120_000);
+            } catch (err: any) {
+              assistantContent = `Error: ${String(err?.message || err)}`;
+            }
+            const asstMsgId = crypto.randomUUID();
+            db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+              .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+            if (DEBUG) app.log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Bootstrap turn: assistant response persisted');
+          } catch (_) {
+            // swallow; best-effort bootstrap message
+          } finally {
+            if (got) releaseLock(id);
+          }
+        })().catch(() => {});
+      }
       proc!.once('exit', (code: number | null) => {
         const db3 = getDb();
         db3.prepare('update sessions set status = ?, exit_code = ?, closed_at = ?, pid = NULL where id = ?')
@@ -335,6 +371,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
     // If HTML requested, render page
     const accept = req.headers.accept || '';
     if (accept.includes('text/html')) {
+      const q = req.query as any;
+      const debug = DEBUG || q.debug === '1' || q.debug === 'true';
       const html = layout(
         `Session ${id}`,
         `
@@ -355,26 +393,38 @@ export async function buildServer(opts?: { listen?: boolean }) {
         <div id="log" class="log mono"></div>
         <script>
           const id = ${JSON.stringify(id)};
+          const DEBUG = ${JSON.stringify(!!debug)};
+          function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
+          function dbgPost(evt, extra){ if(!DEBUG) return; try{ navigator.sendBeacon('/client-log', JSON.stringify({ evt, id, t: Date.now(), ...extra })); } catch(_){} }
           async function poll() {
             // Explicitly request JSON to avoid content-negotiation returning HTML
+            dbg('poll: start'); dbgPost('poll-start');
             const res = await fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } });
             const data = await res.json();
+            dbg('poll: session ok', data && data.id);
             const msgsRes = await fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } });
             const msgs = await msgsRes.json();
+            dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs);
             document.getElementById('msgs').textContent = msgs.map(m => '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content).join('\n');
             const logRes = await fetch('/sessions/' + id + '/log?tail=500');
-            document.getElementById('log').textContent = await logRes.text();
+            const logText = await logRes.text();
+            dbg('poll: log bytes', logText.length);
+            document.getElementById('log').textContent = logText;
+            dbg('poll: done'); dbgPost('poll-done');
           }
-          setInterval(() => { poll().catch(() => {}); }, 250);
-          poll().catch(() => {});
+          setInterval(() => { poll().catch((e) => { dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); }); }, 500);
+          poll().catch((e) => { dbg('first poll error', e && e.message); dbgPost('first-poll-error', { message: String(e && e.message) }); });
 
           document.getElementById('msgform').addEventListener('submit', async (e) => {
             e.preventDefault();
             const content = document.getElementById('msg').value;
             if (!content.trim()) return;
+            dbg('submit: sending'); dbgPost('submit');
             await fetch('/sessions/' + id + '/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ content }) });
             document.getElementById('msg').value='';
+            dbg('submit: sent');
           });
+          window.addEventListener('error', function(ev){ dbg('window error', ev && ev.message); dbgPost('window-error', { message: String(ev && ev.message) }); });
         </script>
         `
       );
@@ -409,6 +459,10 @@ export async function buildServer(opts?: { listen?: boolean }) {
       const turnId = crypto.randomUUID();
       const now = Date.now();
       const userMsgId = crypto.randomUUID();
+      if (DEBUG) {
+        const preview = typeof content === 'string' ? content.slice(0, 120) : String(content).slice(0, 120);
+        (req as any).log.info({ id, turnId, preview, len: (content || '').length }, 'Incoming user message');
+      }
       db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
         .run(userMsgId, id, turnId, 'user', content, now);
       db.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
@@ -423,6 +477,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
       const asstMsgId = crypto.randomUUID();
       db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
         .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+      if (DEBUG) (req as any).log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Assistant message persisted');
       return reply.send({ turn_id: turnId, user_message_id: userMsgId, assistant_message_id: asstMsgId });
     } finally {
       releaseLock(id);
@@ -453,6 +508,17 @@ export async function buildServer(opts?: { listen?: boolean }) {
       db.prepare('update sessions set status = ?, closed_at = ? where id = ?').run('canceled', Date.now(), id);
     }
     reply.redirect(`/sessions/${id}`);
+  });
+
+  // Client-side debug logging endpoint (enabled always; no data persisted)
+  app.post('/client-log', async (req, reply) => {
+    try {
+      const body = (req.body as any) || {};
+      app.log.info({ client: true, ...body }, 'client-log');
+      reply.send({ ok: true });
+    } catch {
+      reply.send({ ok: false });
+    }
   });
 
   if (opts?.listen !== false) {
