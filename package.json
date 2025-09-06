@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:info": "AWRAPPER_LOG_LEVEL=info tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json && pnpm -C web build",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -12,6 +12,14 @@ export const ARTIFACTS_DIR = path.join(DATA_DIR, 'artifacts');
 export const DEFAULT_BIND = process.env.BIND_ADDR || '127.0.0.1';
 export const DEFAULT_PORT = Number(process.env.PORT || 8787);
 export const DEBUG = process.env.AWRAPPER_DEBUG === '1' || process.env.DEBUG === '1';
+// Allow explicit log level override; fallback to DEBUG→info else warn
+export const LOG_LEVEL = (process.env.AWRAPPER_LOG_LEVEL || (DEBUG ? 'info' : 'warn')) as
+  | 'fatal'
+  | 'error'
+  | 'warn'
+  | 'info'
+  | 'debug'
+  | 'trace';
 export const HTTP_LOG = process.env.AWRAPPER_HTTP_LOG === '1';
 export const PROTO_TRY_CONFIGURE = process.env.AWRAPPER_PROTO_CONFIGURE === '1';
 

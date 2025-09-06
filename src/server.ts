@@ -10,14 +10,14 @@ import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
 
 export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({
-    logger: { transport: { target: 'pino-pretty' }, level: DEBUG ? 'info' : 'warn' },
+    logger: { transport: { target: 'pino-pretty' }, level: LOG_LEVEL },
     disableRequestLogging: !HTTP_LOG
   }).withTypeProvider<ZodTypeProvider>();
   // Enable parsing of application/x-www-form-urlencoded for HTML forms
@@ -706,6 +706,28 @@ export async function buildServer(opts?: { listen?: boolean }) {
     }
   });
 
+  // SPA fallback for client-side routes (exclude API endpoints)
+  // Use notFound handler that serves web/dist/index.html when present.
+  app.setNotFoundHandler(async (req, reply) => {
+    try {
+      const rawUrl = String((req as any).raw?.url || '');
+      const method = String((req as any).raw?.method || 'GET');
+      if (method !== 'GET') return reply.code(404).send({ error: 'Not found' });
+      if (rawUrl.startsWith('/sessions') || rawUrl.startsWith('/browse') || rawUrl.startsWith('/client-log')) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      const webDist = path.resolve(process.cwd(), 'web/dist');
+      const indexPath = path.join(webDist, 'index.html');
+      if (await fs.pathExists(indexPath)) {
+        const html = await fs.readFile(indexPath, 'utf8');
+        return reply.type('text/html').send(html);
+      }
+      return reply.code(404).send({ error: 'Not found' });
+    } catch {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+  });
+
   if (opts?.listen !== false) {
     try {
       const url = await app.listen({ host: DEFAULT_BIND, port: DEFAULT_PORT });
@@ -721,22 +743,6 @@ export async function buildServer(opts?: { listen?: boolean }) {
       }
     }
   }
-
-  // SPA fallback for client-side routes (exclude API endpoints)
-  app.setNotFoundHandler((req, reply) => {
-    const url = String((req as any).raw?.url || '')
-    const method = String((req as any).raw?.method || 'GET')
-    if (method !== 'GET') return reply.code(404).send({ error: 'Not found' })
-    if (url.startsWith('/sessions') || url.startsWith('/browse') || url.startsWith('/client-log')) {
-      return reply.code(404).send({ error: 'Not found' })
-    }
-    try {
-      // @ts-ignore fastify-static sendFile
-      return (reply as any).sendFile('index.html')
-    } catch {
-      return reply.code(404).send({ error: 'Not found' })
-    }
-  });
   return app;
 }
 
