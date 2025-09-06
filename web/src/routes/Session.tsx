@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { api, type Message as ApiMessage } from '../lib/api'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
@@ -15,12 +15,15 @@ import { cn } from '../lib/utils'
 import { toast } from 'sonner'
 import { CodeBlock } from '../components/ui/code-block'
 import { Switch } from '../components/ui/switch'
+import { useAgentTraces, type AgentTrace } from '../lib/agent-trace'
+import { TraceView } from '../components/trace/TraceView'
 
 export default function Session() {
   const { id = '' } = useParams()
   const [text, setText] = useState('')
   const sess = useQuery({ queryKey: ['session', id], queryFn: () => api.getSession(id), refetchInterval: 5000 })
   const msgs = useQuery({ queryKey: ['messages', id], queryFn: () => api.listMessages(id), refetchInterval: 1500 })
+  const tracesQ = useAgentTraces(id)
   const [fullLog, setFullLog] = useState(false)
   const log = useQuery({ queryKey: ['log', id, fullLog ? 'all' : 800], queryFn: () => api.tailLog(id, fullLog ? 'all' : 800), refetchInterval: fullLog ? 5000 : 1500 })
   const m = useMutation({ mutationFn: (content: string) => api.sendMessage(id, content), onSuccess: () => setText('') })
@@ -77,7 +80,7 @@ export default function Session() {
                   ) : (
                     <div className="space-y-2">
                       {msgs.data?.map((m) => (
-                        <MessageBubble key={m.id} role={m.role} content={m.content} createdAt={m.created_at} />
+                        <MessageItem key={m.id} m={m} traces={tracesQ.traces} />
                       ))}
                     </div>
                   )}
@@ -169,11 +172,24 @@ export default function Session() {
   )
 }
 
-function MessageBubble({ role, content, createdAt }: { role: 'user' | 'assistant'; content: string; createdAt: number }) {
-  const segments = useMemo(() => parseSegments(content), [content])
-  const align = role === 'user' ? 'ml-auto bg-slate-200' : 'mr-auto bg-white border'
+function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTrace> }) {
+  const align = m.role === 'user' ? 'ml-auto' : 'mr-auto'
+  const bubbleColor = m.role === 'user' ? 'bg-slate-200' : 'bg-white border'
+  const Trace = m.role === 'assistant' && m.turn_id ? traces.get(m.turn_id) : undefined
   return (
-    <div className={cn('max-w-[90%] rounded-lg p-2', align)}>
+    <div className={cn('max-w-[90%] space-y-1', align)}>
+      {Trace && (
+        <TraceView trace={Trace} />
+      )}
+      <MessageBubble role={m.role} content={m.content} createdAt={m.created_at} className={bubbleColor} />
+    </div>
+  )
+}
+
+function MessageBubble({ role, content, createdAt, className }: { role: 'user' | 'assistant'; content: string; createdAt: number; className?: string }) {
+  const segments = useMemo(() => parseSegments(content), [content])
+  return (
+    <div className={cn('rounded-lg p-2', className)}>
       <div className="mb-1 text-[11px] text-slate-500">[{new Date(createdAt).toLocaleTimeString()}] {role}</div>
       <div className="space-y-2">
         {segments.map((seg, i) => (
