@@ -405,7 +405,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
             function dbg(){ if(!DEBUG) return; try{ console.log.apply(console, arguments); }catch(_){}}
             function assign(t, s){ if(!s) return t; for (var k in s){ if(Object.prototype.hasOwnProperty.call(s,k)) t[k]=s[k]; } return t; }
           function dbgPost(evt, extra){ if(!DEBUG) return; try{ var payload = assign({ evt: evt, id: id, t: Date.now() }, extra || {}); navigator.sendBeacon('/client-log', JSON.stringify(payload)); } catch(_){} }
-          function escapeHtml(s){ return String(s==null? '': s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
+          function escapeHtml(s){ return String(s==null? '': s).replace(/[&<>"]/g, function(ch){ return ch==='&'?'&amp;': ch==='<'?'&lt;': ch==='>'?'&gt;': '&quot;'; }); }
           function parseProtoEvents(text){
             var events = [];
             if (!text) return events;
@@ -549,6 +549,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     if (!acquireLock(id)) return reply.code(409).send({ error: 'turn in flight' });
     try {
       let proto = protoSessions.get(id);
+      let revivedNow = false;
       // If the in-memory proto session is missing (e.g., server restart), try to revive it lazily
       if (!proto) {
         try {
@@ -572,6 +573,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
             protoSessions.delete(id);
           });
           proto = revived;
+          revivedNow = true;
         } catch (e: any) {
           (req as any).log.warn({ id, err: String(e?.message || e) }, 'Failed to revive session process');
           return reply.code(503).send({ error: 'session process not available' });
@@ -589,7 +591,29 @@ export async function buildServer(opts?: { listen?: boolean }) {
         .run(userMsgId, id, turnId, 'user', content, now);
       db.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
 
-      const runId = proto.sendUserInput(content, turnId);
+      // Build content to send to the agent (hydrate with prior transcript if we just revived)
+      let contentToSend = content;
+      if (revivedNow) {
+        const rows = db
+          .prepare('select role, content from messages where session_id = ? order by created_at asc')
+          .all(id) as Array<{ role: string; content: string }>;
+        const lines = rows.map((r) => `${r.role[0].toUpperCase()}${r.role.slice(1)}: ${r.content}`);
+        const transcript = lines.join('\n');
+        const preface = [
+          'Context: Resumed persistent session. Full prior transcript follows (most recent last):',
+          '',
+          transcript,
+          '',
+          '— End transcript —',
+          '',
+          // Append the fresh user request clearly demarcated
+          `User: ${content}`
+        ].join('\n');
+        contentToSend = preface;
+        if (DEBUG) (req as any).log.info({ id, messages: rows.length, clen: preface.length }, 'Hydrated turn after revive');
+      }
+
+      const runId = proto.sendUserInput(contentToSend, turnId);
       let assistantContent = '';
       try {
         assistantContent = await proto.awaitTaskComplete(runId, 120_000);
