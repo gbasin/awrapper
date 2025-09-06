@@ -2,6 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Allow overriding the backend API origin/port for dev proxy.
+// Defaults to the server's default port (8787).
+const API_ORIGIN =
+  process.env.AWRAPPER_API_ORIGIN ||
+  process.env.API_ORIGIN ||
+  `http://127.0.0.1:${process.env.AWRAPPER_API_PORT || process.env.API_PORT || 8787}`
+
 export default defineConfig({
   plugins: [
     react(),
@@ -22,9 +29,9 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/sessions': 'http://localhost:3000',
-      '/browse': 'http://localhost:3000',
-      '/client-log': 'http://localhost:3000',
+      '/sessions': API_ORIGIN,
+      '/browse': API_ORIGIN,
+      '/client-log': API_ORIGIN,
     },
   },
 })

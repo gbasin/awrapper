@@ -34,6 +34,12 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - `OPENAI_API_KEY`: required for Codex to call OpenAI.
 - `AWRAPPER_DEBUG`/`DEBUG`: enable verbose server logs and client debug integration.
 
+### Web dev proxy
+
+- `AWRAPPER_API_ORIGIN` or `API_ORIGIN`: backend origin for Vite dev proxy, e.g., `http://127.0.0.1:8787`.
+- `AWRAPPER_API_PORT` or `API_PORT`: port-only override used when origin is not set (defaults to `8787`).
+- Notes: the server falls back to a random free port if the default is busy; when that happens, set `AWRAPPER_API_ORIGIN` so the dev UI can reach the API.
+
 ## How sessions work
 
 - Oneshot: spawns `codex exec --json`, captures and stores the last assistant message on exit.
