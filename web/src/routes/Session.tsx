@@ -49,8 +49,8 @@ export default function Session() {
   const s = sess.data!
 
   return (
-    <div className="space-y-4">
-      <Card>
+    <div className="h-full flex flex-col">
+      <Card className="flex-1 min-h-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
             <span className="truncate">{s.id}</span>
@@ -60,16 +60,17 @@ export default function Session() {
           </CardTitle>
           <div className="px-4 text-sm text-slate-500">{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</div>
         </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="messages">
+        <CardContent className="flex flex-col min-h-0">
+          <Tabs defaultValue="messages" className="flex min-h-0 flex-col">
             <TabsList>
               <TabsTrigger value="messages">Messages</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="messages">
-              <div className="rounded border">
-                <ScrollArea className="h-[360px] p-2 bg-slate-50">
+            <div className="mt-2 flex-1 min-h-0">
+            <TabsContent value="messages" className="h-full mt-0">
+              <div className="rounded border h-full flex flex-col">
+                <ScrollArea className="flex-1 p-2 bg-slate-50">
                   {msgs.isLoading ? (
                     <div className="space-y-2">
                       <Skeleton className="h-4 w-1/2" />
@@ -105,8 +106,8 @@ export default function Session() {
               </div>
             </TabsContent>
 
-            <TabsContent value="logs">
-              <div className="rounded border">
+            <TabsContent value="logs" className="h-full mt-0">
+              <div className="rounded border h-full flex flex-col">
                 <div className="flex items-center justify-end gap-3 bg-slate-50 px-2 py-1 border-b">
                   <label className="flex items-center gap-2 text-xs text-slate-600">
                     <span>Wrap lines</span>
@@ -135,7 +136,7 @@ export default function Session() {
                     <Copy className="mr-2 h-3 w-3" /> Copy
                   </Button>
                 </div>
-                <ScrollArea className="h-[420px] bg-white p-2">
+                <ScrollArea className="flex-1 bg-white p-2">
                   {log.isLoading ? (
                     <Skeleton className="h-64 w-full" />
                   ) : (
@@ -144,6 +145,7 @@ export default function Session() {
                 </ScrollArea>
               </div>
             </TabsContent>
+            </div>
           </Tabs>
           <div className="mt-3 flex justify-end">
             <AlertDialog>

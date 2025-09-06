@@ -106,10 +106,16 @@ function ellipsize(s: string, n: number): string {
   return str.length > n ? str.slice(0, n - 1) + '…' : str
 }
 
-export function useAgentTraces(sessionId: string, tail: number | 'all' = 800) {
-  const q = useQuery({ queryKey: ['trace-log', sessionId, tail], queryFn: () => api.tailLog(sessionId, tail), refetchInterval: 1500 })
-  const traces = useMemo(() => buildTraces(parseProtoEvents(q.data)), [q.data])
-  return { traces, isLoading: q.isLoading, error: q.error as any, refetch: q.refetch }
+export function useAgentTraces(sessionId: string) {
+  // Always fetch the full log; build traces from complete history.
+  const qAll = useQuery({
+    queryKey: ['trace-log-all', sessionId],
+    queryFn: () => api.tailLog(sessionId, 'all'),
+    refetchInterval: 1500,
+  })
+  const events = useMemo(() => parseProtoEvents(qAll.data), [qAll.data])
+  const traces = useMemo(() => buildTraces(events), [events])
+  return { traces, isLoading: qAll.isLoading, error: qAll.error as any, refetch: qAll.refetch }
 }
 
 export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
@@ -167,8 +173,13 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
       }
       case 'agent_reasoning': {
         const text = String(e.msg?.text || '')
-        t.reasoningSections = [{ text, title: extractTitleFromMarkdown(text) }]
-        t._reasoningIdx = 0
+        // Snapshot replaces the CURRENT section text, not all sections
+        if (t._reasoningIdx < 0) {
+          t._reasoningIdx = t.reasoningSections.length
+          t.reasoningSections.push({ text, title: extractTitleFromMarkdown(text) })
+        } else {
+          t.reasoningSections[t._reasoningIdx] = { text, title: extractTitleFromMarkdown(text) }
+        }
         break
       }
       case 'agent_message_delta': {
