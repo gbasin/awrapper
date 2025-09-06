@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '../components/ui/dialog'
 import { Button } from '../components/ui/button'
 import { Separator } from '../components/ui/separator'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbSeparator } from '../components/ui/breadcrumb'
@@ -128,6 +128,9 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Choose a repository</DialogTitle>
+          <DialogDescription>
+            Select a folder or Git repository to use as your workspace.
+          </DialogDescription>
         </DialogHeader>
         <Content />
       </DialogContent>

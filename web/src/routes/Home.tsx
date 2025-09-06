@@ -106,7 +106,7 @@ function SessionsTable({ rows }: { rows: Session[] }) {
               <Td>{s.agent_id}</Td>
               <Td>{s.lifecycle}</Td>
               <Td>
-                <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : s.status === 'closed' ? 'secondary' : 'outline'}>
+                <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
                   {s.status}
                 </Badge>
               </Td>

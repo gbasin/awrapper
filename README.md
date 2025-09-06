@@ -33,6 +33,7 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - `CODEX_BIN`: path to `codex` binary if not on PATH.
 - `OPENAI_API_KEY`: required for Codex to call OpenAI.
 - `AWRAPPER_DEBUG`/`DEBUG`: enable verbose server logs and client debug integration.
+- `AWRAPPER_TURN_TIMEOUT_SECS` (or `TURN_TIMEOUT_SECS`): max seconds the server waits for a single user turn in persistent sessions before timing out (default 600 seconds).
 
 ### Web dev proxy
 

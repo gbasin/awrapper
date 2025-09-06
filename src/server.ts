@@ -10,7 +10,7 @@ import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnOneshotCodex, spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
@@ -61,17 +61,16 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // SSR homepage has been replaced by SPA at '/'; keep legacy HTML available under '/__legacy' temporarily
   app.get('/__legacy', async (_req, reply) => {
     const db = getDb();
-    const sessions = db.prepare('select id, agent_id, lifecycle, status, repo_path, branch, started_at, last_activity_at from sessions order by started_at desc limit 50').all() as any[];
-    const rows = sessions
-      .map(
-        (s) => `<tr>
+    const sessions = db.prepare('select id, agent_id, lifecycle, status, repo_path, branch, started_at, last_activity_at, pid from sessions order by started_at desc limit 50').all() as any[];
+    const sessions2 = sessions.map((s) => ({ ...s, status: computeDisplayStatus(s) }));
+    const rows = sessions2
+      .map((s) => `<tr>
           <td><a href="/sessions/${s.id}">${s.id}</a></td>
           <td>${escapeHtml(s.agent_id)}</td>
           <td>${escapeHtml(s.lifecycle)}</td>
           <td>${escapeHtml(s.status)}</td>
           <td class="muted">${escapeHtml(s.repo_path)}${s.branch ? ' @ ' + escapeHtml(s.branch) : ''}</td>
-        </tr>`
-      )
+        </tr>`)
       .join('');
     // Build a datalist of recent repo paths for quick selection
     const seen = new Set<string>();
@@ -358,7 +357,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
             const runId = proto.sendUserInput(text, turnId);
             let assistantContent = '';
             try {
-              assistantContent = await proto.awaitTaskComplete(runId, 120_000);
+              assistantContent = await proto.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
             } catch (err: any) {
               assistantContent = `Error: ${String(err?.message || err)}`;
             }
@@ -391,8 +390,9 @@ export async function buildServer(opts?: { listen?: boolean }) {
 
   app.get('/sessions', async (_req, reply) => {
     const db = getDb();
-    const rows = db.prepare('select * from sessions order by started_at desc limit 100').all();
-    reply.send(rows);
+    const rows = db.prepare('select * from sessions order by started_at desc limit 100').all() as any[];
+    const withDerived = rows.map((r) => ({ ...r, status: computeDisplayStatus(r) }));
+    reply.send(withDerived);
   });
 
   app.get('/sessions/:id', async (req, reply) => {
@@ -400,6 +400,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const db = getDb();
     const row = db.prepare('select * from sessions where id = ?').get(id) as Session | undefined;
     if (!row) return reply.code(404).send({ error: 'not found' });
+    (row as any).status = computeDisplayStatus(row as any);
     const msgs = db.prepare('select * from messages where session_id = ? order by created_at asc limit 200').all(id) as Message[];
 
     // If HTML requested, render page
@@ -645,7 +646,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
       const runId = proto.sendUserInput(contentToSend, turnId);
       let assistantContent = '';
       try {
-        assistantContent = await proto.awaitTaskComplete(runId, 120_000);
+        assistantContent = await proto.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
       } catch (err: any) {
         assistantContent = `Error: ${String(err?.message || err)}`;
       }
@@ -661,12 +662,18 @@ export async function buildServer(opts?: { listen?: boolean }) {
 
   app.get('/sessions/:id/log', async (req, reply) => {
     const { id } = req.params as any;
-    const tail = Number((req.query as any).tail || 200);
+    const tailParam = String((req.query as any).tail || '200');
     const db = getDb();
     const s = db.prepare('select log_path from sessions where id = ?').get(id) as { log_path: string } | undefined;
     if (!s) return reply.code(404).send('');
     try {
-      const text = await tailFile(s.log_path, tail);
+      let text = '';
+      if (tailParam === 'all') {
+        text = await readWholeFile(s.log_path);
+      } else {
+        const tail = Number(tailParam || 200);
+        text = await tailFile(s.log_path, Number.isFinite(tail) && tail > 0 ? tail : 200);
+      }
       reply.type('text/plain').send(text);
     } catch {
       reply.type('text/plain').send('');
@@ -756,6 +763,14 @@ async function tailFile(filePath: string, n: number): Promise<string> {
   }
 }
 
+async function readWholeFile(filePath: string): Promise<string> {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 function expandPath(p: string | undefined): string {
   if (!p) return '';
   if (p.startsWith('~/') || p === '~') {
@@ -763,4 +778,34 @@ function expandPath(p: string | undefined): string {
     return path.join(os.homedir(), suffix);
   }
   return p;
+}
+
+// Determine if a PID is currently alive on this system.
+function isPidAlive(pid?: number | null): boolean {
+  if (!pid || typeof pid !== 'number') return false;
+  try {
+    // Signal 0 performs error checking without actually sending a signal
+    process.kill(pid, 0 as any);
+    return true;
+  } catch (err: any) {
+    // EPERM means the process exists but we lack permission to signal it
+    return !!(err && err.code === 'EPERM');
+  }
+}
+
+// Compute a user-facing status. If a persistent session says 'running' but the
+// PID is not alive (e.g., server restarted or process exited), mark it 'stale'.
+function computeDisplayStatus(row: { status: string; pid?: number | null; lifecycle?: string }): string {
+  const s = String(row?.status || '');
+  const lc = String(row?.lifecycle || '');
+  if (lc === 'persistent') {
+    if (s === 'running') {
+      return isPidAlive(row.pid) ? 'running' : 'stale';
+    }
+    if (s === 'starting') {
+      // If there's no living PID for a long-starting session, surface as stale
+      return isPidAlive(row.pid) ? 'starting' : 'stale';
+    }
+  }
+  return s;
 }

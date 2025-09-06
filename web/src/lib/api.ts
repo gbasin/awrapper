@@ -45,9 +45,9 @@ export const api = {
   },
   listMessages: (id: string) => json<Message[]>(`/sessions/${id}/messages`),
   sendMessage: (id: string, content: string) => json(`/sessions/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) }),
-  tailLog: async (id: string, n = 800) => {
-    const res = await fetch(`/sessions/${id}/log?tail=${n}`)
+  tailLog: async (id: string, tail: number | 'all' = 800) => {
+    const param = typeof tail === 'number' ? String(tail) : 'all'
+    const res = await fetch(`/sessions/${id}/log?tail=${param}`)
     return res.ok ? res.text() : ''
   },
 }
-

@@ -14,19 +14,32 @@ import { Skeleton } from '../components/ui/skeleton'
 import { cn } from '../lib/utils'
 import { toast } from 'sonner'
 import { CodeBlock } from '../components/ui/code-block'
+import { Switch } from '../components/ui/switch'
 
 export default function Session() {
   const { id = '' } = useParams()
   const [text, setText] = useState('')
   const sess = useQuery({ queryKey: ['session', id], queryFn: () => api.getSession(id), refetchInterval: 5000 })
   const msgs = useQuery({ queryKey: ['messages', id], queryFn: () => api.listMessages(id), refetchInterval: 1500 })
-  const log = useQuery({ queryKey: ['log', id], queryFn: () => api.tailLog(id, 800), refetchInterval: 1500 })
+  const [fullLog, setFullLog] = useState(false)
+  const log = useQuery({ queryKey: ['log', id, fullLog ? 'all' : 800], queryFn: () => api.tailLog(id, fullLog ? 'all' : 800), refetchInterval: fullLog ? 5000 : 1500 })
   const m = useMutation({ mutationFn: (content: string) => api.sendMessage(id, content), onSuccess: () => setText('') })
   const logRef = useRef<HTMLPreElement>(null)
+  const [wrap, setWrap] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('awrapper:logsWrap') !== '0'
+    } catch {
+      return true
+    }
+  })
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [log.data])
+
+  useEffect(() => {
+    try { localStorage.setItem('awrapper:logsWrap', wrap ? '1' : '0') } catch {}
+  }, [wrap])
 
   if (sess.isLoading) return <div>Loading…</div>
   if (sess.error) return <div className="text-red-600">Failed to load session</div>
@@ -38,7 +51,7 @@ export default function Session() {
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
             <span className="truncate">{s.id}</span>
-            <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : s.status === 'closed' ? 'secondary' : 'outline'}>
+            <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
               {s.lifecycle} • {s.status}
             </Badge>
           </CardTitle>
@@ -91,11 +104,39 @@ export default function Session() {
 
             <TabsContent value="logs">
               <div className="rounded border">
-                <ScrollArea className="h-[420px] bg-slate-50 p-2">
+                <div className="flex items-center justify-end gap-3 bg-slate-50 px-2 py-1 border-b">
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <span>Wrap lines</span>
+                    <Switch checked={wrap} onCheckedChange={(v) => setWrap(!!v)} />
+                  </label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={fullLog ? 'default' : 'secondary'}
+                    onClick={() => setFullLog(v => !v)}
+                    disabled={log.isLoading}
+                  >
+                    {fullLog ? 'View recent' : 'View full log'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      const text = log.data ?? ''
+                      if (!text) return
+                      navigator.clipboard.writeText(text).then(() => toast.success('Logs copied'))
+                    }}
+                    disabled={log.isLoading || !log.data}
+                  >
+                    <Copy className="mr-2 h-3 w-3" /> Copy
+                  </Button>
+                </div>
+                <ScrollArea className="h-[420px] bg-white p-2">
                   {log.isLoading ? (
                     <Skeleton className="h-64 w-full" />
                   ) : (
-                    <pre ref={logRef} className="mono text-xs whitespace-pre-wrap">{log.data}</pre>
+                    <pre ref={logRef} className={cn('mono text-xs', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre')}>{log.data}</pre>
                   )}
                 </ScrollArea>
               </div>
