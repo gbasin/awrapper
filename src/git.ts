@@ -30,3 +30,15 @@ export async function ensureWorktree(repoPath: string, branch: string | undefine
   return wtPath;
 }
 
+// Return the current checked-out branch name for a Git repo, or null if it
+// cannot be determined (e.g., detached HEAD or not a repo).
+export async function currentBranch(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execa('git', ['-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const name = String(stdout || '').trim();
+    if (!name) return null;
+    return name;
+  } catch {
+    return null;
+  }
+}

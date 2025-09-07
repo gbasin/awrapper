@@ -26,7 +26,8 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
-  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string }) => {
+  getConfig: () => json<{ default_use_worktree: boolean }>('/config'),
+  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

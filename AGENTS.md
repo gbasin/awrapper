@@ -36,3 +36,12 @@ Troubleshooting
 - No response: check `~/.awrapper/logs/session-<id>.log` for Codex CLI errors.
 - Network/API errors: ensure `OPENAI_API_KEY` is set for the spawned Codex process.
 - Browser shows nothing: open the session URL with `?debug=1` to emit client logs and mirror them to the server (`POST /client-log`).
+
+Code‑aware search (ast-grep)
+
+- Purpose: prefer AST-aware search/replace over regex for multi-file refactors.
+- Install: `brew install ast-grep` or `npm i -g @ast-grep/cli`.
+- Search: `sg -l ts -p 'console.log($X)' src` to find patterns in TS/JS.
+- Rewrite (dry-run): `sg -l ts -p 'oldFn($A, $B)' --rewrite 'newFn($B, $A)' --dry-run`.
+- Apply: drop `--dry-run` after reviewing the proposed changes.
+- Scope: use when the change is mechanical and patternable; otherwise edit surgically.

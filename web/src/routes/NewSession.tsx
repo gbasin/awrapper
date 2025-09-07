@@ -8,6 +8,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Button } from '../components/ui/button'
 import { BrowseDialog } from './BrowseDialog'
 import { toast } from 'sonner'
+import { Switch } from '../components/ui/switch'
 
 export default function NewSession() {
   const qc = useQueryClient()
@@ -19,6 +20,20 @@ export default function NewSession() {
     try { return localStorage.getItem('awrapper:lastBranch') || '' } catch { return '' }
   })
   const [initial, setInitial] = useState('')
+  const [useWorktree, setUseWorktree] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem('awrapper:useWorktree')
+      return raw == null ? true : JSON.parse(raw)
+    } catch { return true }
+  })
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('awrapper:useWorktree')
+      if (raw == null) {
+        api.getConfig().then((c) => setUseWorktree(!!c.default_use_worktree)).catch(() => {})
+      }
+    } catch {}
+  }, [])
 
   useEffect(() => { try { localStorage.setItem('awrapper:lastRepoPath', repo) } catch {} }, [repo])
   useEffect(() => { try { localStorage.setItem('awrapper:lastBranch', branch) } catch {} }, [branch])
@@ -54,6 +69,16 @@ export default function NewSession() {
               onChange={(e) => setBranch(e.target.value)}
               className="sm:col-span-2 md:col-span-3"
             />
+            <div className="flex items-center gap-2 sm:col-span-2 md:col-span-3">
+              <Switch
+                checked={useWorktree}
+                onCheckedChange={(v) => {
+                  setUseWorktree(v)
+                  try { localStorage.setItem('awrapper:useWorktree', JSON.stringify(v)) } catch {}
+                }}
+              />
+              <span title="When off, the agent runs directly in your repo. Not isolated; may modify your working tree. If you set a branch, it must match the current checkout.">Use Git worktree (recommended)</span>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col min-h-0">
@@ -74,7 +99,7 @@ export default function NewSession() {
                 onSubmit={(e) => {
                   e.preventDefault()
                   if (!repo.trim()) return
-                  m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined })
+                  m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree })
                 }}
               >
                 <Button type="submit" disabled={m.isPending}>{m.isPending ? 'Creating…' : 'Create session'}</Button>
@@ -86,4 +111,3 @@ export default function NewSession() {
     </div>
   )
 }
-

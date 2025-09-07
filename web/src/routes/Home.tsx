@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Session } from '../lib/api'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Table, Tbody, Th, Thead, Tr, Td } from '../components/ui/table'
@@ -12,6 +12,7 @@ import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
 import { Skeleton } from '../components/ui/skeleton'
 import { Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
+import { Switch } from '../components/ui/switch'
 
 export default function Home() {
   const qc = useQueryClient()
@@ -25,6 +26,22 @@ export default function Home() {
   })
   // lifecycle removed; all sessions are persistent
   const [initial, setInitial] = useState('')
+  const [useWorktree, setUseWorktree] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem('awrapper:useWorktree')
+      return raw == null ? true : JSON.parse(raw)
+    } catch { return true }
+  })
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('awrapper:useWorktree')
+      if (raw == null) {
+        api.getConfig().then((c) => {
+          setUseWorktree(!!c.default_use_worktree)
+        }).catch(() => {})
+      }
+    } catch {}
+  }, [])
   const m = useMutation({
     mutationFn: api.createSession,
     onSuccess: async ({ id }) => {
@@ -62,7 +79,7 @@ export default function Home() {
             className="grid gap-2 sm:grid-cols-2 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault()
-              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined })
+              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree })
             }}
           >
             <div className="flex items-center gap-2">
@@ -90,6 +107,18 @@ export default function Home() {
                 try { localStorage.setItem('awrapper:lastBranch', v) } catch {}
               }}
             />
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={useWorktree}
+                onCheckedChange={(v) => {
+                  setUseWorktree(v)
+                  try { localStorage.setItem('awrapper:useWorktree', JSON.stringify(v)) } catch {}
+                }}
+              />
+              <span title="When off, the agent runs directly in your repo. Not isolated; may modify your working tree. If you set a branch, it must match the current checkout.">
+                Use Git worktree (recommended)
+              </span>
+            </div>
             {/* lifecycle selection removed: always persistent */}
             <Textarea placeholder="Initial message (optional)" value={initial} onChange={(e) => setInitial(e.target.value)} className="sm:col-span-2 md:col-span-3" />
             <div className="sm:col-span-2 md:col-span-3">

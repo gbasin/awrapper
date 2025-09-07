@@ -7,10 +7,10 @@ import { layout, escapeHtml } from './ui.js';
 import os from 'node:os';
 import path from 'node:path';
 import { getDb, type Session, type Message } from './db.js';
-import { ensureWorktree, isGitRepo } from './git.js';
+import { ensureWorktree, isGitRepo, currentBranch } from './git.js';
 import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
 import { spawnPersistentCodex } from './sessionProc.js';
-import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS } from './config.js';
+import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS, DEFAULT_USE_WORKTREE } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
@@ -67,6 +67,12 @@ export async function buildServer(opts?: { listen?: boolean }) {
   });
 
   // Legacy HTML index at /__legacy removed
+
+  // Directory browsing API for server-side picker
+  // Also surface minimal runtime config for the SPA
+  app.get('/config', async (_req, reply) => {
+    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE });
+  });
 
   // Directory browsing API for server-side picker
   app.get('/browse', async (req, reply) => {
@@ -126,13 +132,30 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const agent_id = body.agent_id || 'codex';
     const repo_path = expandPath(body.repo_path as string);
     const branch = body.branch as string | undefined;
+    const use_worktree = typeof body.use_worktree === 'boolean' ? body.use_worktree : DEFAULT_USE_WORKTREE;
     const initial_message = body.initial_message as string | undefined;
-    app.log.info({ agent_id, repo_path, branch, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
+    app.log.info({ agent_id, repo_path, branch, use_worktree, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
-    if (!(await isGitRepo(repo_path))) return reply.code(400).send({ error: 'repo_path is not a Git repo' });
+    // Validate repo path
+    try {
+      const st = await fs.stat(repo_path);
+      if (!st.isDirectory()) return reply.code(400).send({ error: 'repo_path must be a directory' });
+    } catch (e: any) {
+      return reply.code(400).send({ error: 'repo_path does not exist or is not accessible' });
+    }
+    const isRepo = await isGitRepo(repo_path);
+    if (use_worktree && !isRepo) return reply.code(400).send({ error: 'repo_path is not a Git repo' });
+    // Strict branch semantics when not using a worktree
+    if (!use_worktree && branch && branch.trim()) {
+      if (!isRepo) return reply.code(400).send({ error: 'Branch specified but repo_path is not a Git repo' });
+      const cur = await currentBranch(repo_path);
+      if (!cur || cur !== branch) {
+        return reply.code(400).send({ error: `Branch mismatch: repo is on '${cur ?? 'unknown'}', requested '${branch}'` });
+      }
+    }
     const db = getDb();
     const id = crypto.randomUUID();
-    const worktree_path = await ensureWorktree(repo_path, branch, id);
+    const worktree_path = use_worktree ? await ensureWorktree(repo_path, branch, id) : repo_path;
 
     const { logPath, artifactDir } = await (await import('./sessionProc.js')).setupPaths(id);
     const now = Date.now();

@@ -23,6 +23,11 @@ export const LOG_LEVEL = (process.env.AWRAPPER_LOG_LEVEL || 'info') as
 export const HTTP_LOG = process.env.AWRAPPER_HTTP_LOG === '1';
 export const PROTO_TRY_CONFIGURE = process.env.AWRAPPER_PROTO_CONFIGURE === '1';
 
+// Default behavior for using Git worktrees when creating sessions.
+// Set AWRAPPER_USE_WORKTREE=0 or =false to disable by default.
+const RAW_USE_WT = process.env.AWRAPPER_USE_WORKTREE ?? '1';
+export const DEFAULT_USE_WORKTREE = RAW_USE_WT !== '0' && RAW_USE_WT.toLowerCase() !== 'false';
+
 // Max time to wait for a single user turn to complete in persistent sessions (seconds)
 // Defaults to 600 seconds. Can be overridden via env.
 export const TURN_TIMEOUT_SECS = Number(
