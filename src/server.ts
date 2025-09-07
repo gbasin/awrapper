@@ -285,6 +285,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
         <div id="msgs" class="mono"></div>
         <h3>Agent Trace</h3>
         <div id="trace" class="mono" style="border:1px solid #eee; padding:8px; border-radius:6px"></div>
+        <h3>Approvals</h3>
+        <div id="approvals" class="mono" style="border:1px solid #eee; padding:8px; border-radius:6px"></div>
         <h3>Log</h3>
         <div id="log" class="log mono"></div>
         <script>
@@ -324,6 +326,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
             var message = '';
             var tokens = null;
             var others = [];
+            var approvals = [];
             for (var i=0;i<active.length;i++){
               var e = active[i];
               if (e.type === 'agent_reasoning_delta') {
@@ -337,11 +340,13 @@ export async function buildServer(opts?: { listen?: boolean }) {
                 message = String(e.msg.message || '');
               } else if (e.type === 'token_count') {
                 tokens = { input: e.msg.input_tokens, output: e.msg.output_tokens, total: e.msg.total_tokens };
+              } else if (e.type === 'apply_patch_approval_request') {
+                approvals.push(e);
               } else {
                 others.push(e);
               }
             }
-            return { runId: lastRunId || '', events: active, reasoning: reasoning.join(''), message: message, tokens: tokens, others: others };
+            return { runId: lastRunId || '', events: active, reasoning: reasoning.join(''), message: message, tokens: tokens, others: others, approvals: approvals };
           }
           function renderTrace(section, info){
             if (!section) return;
@@ -383,6 +388,56 @@ export async function buildServer(opts?: { listen?: boolean }) {
             parts.push('</details>');
             section.innerHTML = parts.join('');
           }
+          function shortPath(p){ try { if(!p) return ''; var i=p.indexOf('/.awrapper-worktrees/'); if(i>=0){ return p.slice(i+1); } return p; } catch(_){ return String(p||''); } }
+          function renderApprovals(section, info){
+            if (!section) return;
+            if (!info || !info.approvals || !info.approvals.length) { section.innerHTML = '<div class="muted">No pending approvals.</div>'; return; }
+            var parts = [];
+            for (var i=0;i<info.approvals.length;i++){
+              var e = info.approvals[i];
+              var callId = e.msg && e.msg.call_id ? String(e.msg.call_id) : '';
+              var ch = e.msg && e.msg.changes ? e.msg.changes : {};
+              var files = Object.keys(ch);
+              parts.push('<div style="border:1px solid #ddd; padding:8px; border-radius:6px; margin-bottom:8px">');
+              parts.push('<div><b>Write access requested</b> ' + (callId ? '(call_id ' + escapeHtml(callId) + ')' : '') + '</div>');
+              if (files.length){
+                parts.push('<div style="margin-top:6px">Files (' + files.length + '):</div>');
+                for (var j=0;j<Math.min(files.length, 6);j++){
+                  var fp = files[j];
+                  var op = ch[fp] && ch[fp].add ? 'add' : ch[fp] && ch[fp].update ? 'update' : ch[fp] && ch[fp].delete ? 'delete' : 'change';
+                  parts.push('<div> - ' + escapeHtml(op) + ' ' + escapeHtml(shortPath(fp)) + '</div>');
+                }
+                if (files.length > 6) parts.push('<div class="muted">…and ' + (files.length-6) + ' more</div>');
+              }
+              parts.push('<div style="margin-top:8px; display:flex; gap:8px">\n' +
+                '<button data-approve="' + escapeHtml(callId) + '">Approve once</button>' +
+                '<button data-deny="' + escapeHtml(callId) + '">Deny</button>' +
+              '</div>');
+              parts.push('</div>');
+            }
+            section.innerHTML = parts.join('');
+            // Bind buttons
+            var btnsA = section.querySelectorAll('button[data-approve]');
+            for (var i=0;i<btnsA.length;i++){
+              btnsA[i].addEventListener('click', function(ev){
+                var cid = (ev.currentTarget && ev.currentTarget.getAttribute) ? ev.currentTarget.getAttribute('data-approve') : '';
+                if (!cid) return;
+                fetch('/sessions/' + id + '/approvals', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ call_id: cid, decision: 'approve', scope: 'once' }) })
+                  .then(function(){ ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Approved'; })
+                  .catch(function(e){ dbg('approve error', e && e.message); });
+              });
+            }
+            var btnsD = section.querySelectorAll('button[data-deny]');
+            for (var i=0;i<btnsD.length;i++){
+              btnsD[i].addEventListener('click', function(ev){
+                var cid = (ev.currentTarget && ev.currentTarget.getAttribute) ? ev.currentTarget.getAttribute('data-deny') : '';
+                if (!cid) return;
+                fetch('/sessions/' + id + '/approvals', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ call_id: cid, decision: 'deny' }) })
+                  .then(function(){ ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Denied'; })
+                  .catch(function(e){ dbg('deny error', e && e.message); });
+              });
+            }
+          }
           function poll(){
             dbg('poll: start');
             return fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
@@ -391,7 +446,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
               .then(function(res){ return res.json(); })
               .then(function(msgs){ dbg('poll: msgs', Array.isArray(msgs) ? msgs.length : typeof msgs); var out=''; for(var i=0;i<msgs.length;i++){ var m=msgs[i]; if(i) out+=String.fromCharCode(10); out += '['+new Date(m.created_at).toLocaleTimeString()+'] ' + m.role + ': ' + m.content; } document.getElementById('msgs').textContent = out; return fetch('/sessions/' + id + '/log?tail=800'); })
               .then(function(res){ return res.text(); })
-              .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; try { var evs = parseProtoEvents(logText); var info = summarizeEvents(evs); renderTrace(document.getElementById('trace'), info); } catch(e) { dbg('trace parse error', e && e.message); } dbg('poll: done'); })
+              .then(function(logText){ dbg('poll: log bytes', logText.length); document.getElementById('log').textContent = logText; try { var evs = parseProtoEvents(logText); var info = summarizeEvents(evs); renderTrace(document.getElementById('trace'), info); renderApprovals(document.getElementById('approvals'), info); } catch(e) { dbg('trace parse error', e && e.message); } dbg('poll: done'); })
               .catch(function(e){ dbg('poll error', e && e.message); dbgPost('poll-error', { message: String(e && e.message) }); });
           }
           setInterval(function(){ poll().catch(() => {}); }, 1000);
@@ -603,6 +658,28 @@ export async function buildServer(opts?: { listen?: boolean }) {
       reply.send({ ok: true });
     } catch {
       reply.send({ ok: false });
+    }
+  });
+
+  // Minimal approvals endpoint: forward approve/deny to the agent process
+  app.post('/sessions/:id/approvals', async (req, reply) => {
+    const { id } = req.params as any;
+    const body = (req.body as any) || {};
+    const callId = String(body.call_id || '').trim();
+    const decision = String(body.decision || '').trim();
+    const scope = body.scope ? String(body.scope) as any : undefined;
+    const pathScope = body.path ? String(body.path) : undefined;
+    if (!callId || (decision !== 'approve' && decision !== 'deny')) {
+      return reply.code(400).send({ error: 'invalid request' });
+    }
+    const proto = protoSessions.get(id);
+    if (!proto) return reply.code(409).send({ error: 'session not active' });
+    try {
+      (req as any).log.info({ id, callId, decision, scope, pathScope }, 'Forwarding approval decision');
+      proto.sendApprovalDecision(callId, decision as any, { scope, path: pathScope });
+      return reply.send({ ok: true });
+    } catch (e: any) {
+      return reply.code(500).send({ error: String(e?.message || e || 'failed to send decision') });
     }
   });
 

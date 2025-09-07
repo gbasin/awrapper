@@ -56,6 +56,25 @@ export class CodexProtoSession {
     this.proc.stdin.write(line);
   }
 
+  // Minimal helper to respond to tool approval requests (e.g., apply_patch)
+  // The wire protocol is intentionally generic: we send the decision back
+  // tagged by the call id so the agent can proceed or cancel.
+  sendApprovalDecision(callId: string, decision: 'approve' | 'deny', opts?: { scope?: 'once' | 'session' | 'path'; path?: string }) {
+    if (!callId || (decision !== 'approve' && decision !== 'deny')) {
+      throw new Error('invalid approval decision');
+    }
+    const payload: any = {
+      id: callId,
+      op: {
+        type: 'approval_decision',
+        decision
+      }
+    };
+    if (opts?.scope) payload.op.scope = opts.scope;
+    if (opts?.path) payload.op.path = opts.path;
+    this.send(payload);
+  }
+
   async configureSession(cwd: string, opts?: {
     provider?: { name?: string; base_url?: string; env_key?: string; wire_api?: 'responses' | 'chat' };
     model?: string;
