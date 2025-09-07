@@ -268,12 +268,14 @@ function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTr
   const align = m.role === 'user' ? 'ml-auto' : 'mr-auto'
   const bubbleColor = m.role === 'user' ? 'bg-slate-100' : 'bg-white border'
   const Trace = m.role === 'assistant' && m.turn_id ? traces.get(m.turn_id) : undefined
+  const isStreaming = m.role === 'assistant' && !!Trace && Trace.status === 'running'
+  const bubbleClass = cn(bubbleColor, isStreaming && 'border-amber-300 animate-pulse')
   return (
     <div className={cn('max-w-[72ch] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[60%] space-y-1', align)}>
       {Trace && (
-        <TraceView trace={Trace} />
+        <TraceView trace={Trace} showAssistant={false} />
       )}
-      <MessageBubble role={m.role} content={m.content} createdAt={m.created_at} className={bubbleColor} />
+      <MessageBubble role={m.role} content={m.content} createdAt={m.created_at} className={bubbleClass} />
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { Copy, Lightbulb, MessageSquareText, Wrench, ChevronRight, Loader2, Chec
 import { toast } from 'sonner'
 import { Markdown } from '../ui/markdown'
 
-export function TraceView({ trace, className }: { trace: AgentTrace; className?: string }) {
+export function TraceView({ trace, className, showAssistant = true }: { trace: AgentTrace; className?: string; showAssistant?: boolean }) {
   const [open, setOpen] = useState(false)
   const summary = useMemo(() => buildSummary(trace), [trace])
 
@@ -42,7 +42,7 @@ export function TraceView({ trace, className }: { trace: AgentTrace; className?:
       {open && (
         <div className="border-t">
           <div className="max-h-96 overflow-y-auto p-2 space-y-2 bg-slate-50">
-            <Timeline trace={trace} />
+            <Timeline trace={trace} showAssistant={showAssistant} />
             {trace.errors.length > 0 && (
               <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
                 <div className="font-medium">Errors</div>
@@ -80,14 +80,14 @@ function buildSummary(t: AgentTrace): string {
   return parts.join(' • ')
 }
 
-function Timeline({ trace }: { trace: AgentTrace }) {
+function Timeline({ trace, showAssistant }: { trace: AgentTrace; showAssistant: boolean }) {
   const items = useMemo(() => {
     const arr: Array<{ kind: 'reasoning'; section: ReasoningSection } | { kind: 'tool'; tool: ToolCall } | { kind: 'assistant'; text: string; seq: number }> = []
     for (const s of trace.reasoningSections) arr.push({ kind: 'reasoning', section: s })
     for (const t of trace.tools) arr.push({ kind: 'tool', tool: t })
-    if (trace.assistant) arr.push({ kind: 'assistant', text: trace.assistant, seq: trace.assistantSeq || Number.MAX_SAFE_INTEGER })
+    if (showAssistant && trace.assistant) arr.push({ kind: 'assistant', text: trace.assistant, seq: trace.assistantSeq || Number.MAX_SAFE_INTEGER })
     return arr.sort((a, b) => (getSeq(a) - getSeq(b)))
-  }, [trace])
+  }, [trace, showAssistant])
   return (
     <div className="space-y-1">
       {items.map((it, i) => (

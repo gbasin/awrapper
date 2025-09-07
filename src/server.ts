@@ -170,15 +170,46 @@ export async function buildServer(opts?: { listen?: boolean }) {
             db4.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
 
             const runId = proto.sendUserInput(text, turnId);
+            // Insert a placeholder assistant message immediately and stream updates
+            const asstMsgId = crypto.randomUUID();
+            db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+              .run(asstMsgId, id, turnId, 'assistant', '', Date.now());
+
+            // Stream assistant deltas into the placeholder row
             let assistantContent = '';
+            // Throttled DB update for streaming deltas
+            let flushTimer: NodeJS.Timeout | null = null;
+            const flushMs = 200; // max ~5 updates/sec
+            const flushSoon = () => {
+              if (flushTimer) return;
+              flushTimer = setTimeout(() => {
+                try { db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+                flushTimer = null;
+              }, flushMs);
+            };
+
+            const off = proto.onEvent((ev) => {
+              try {
+                if (ev.id !== runId) return;
+                const t = ev.msg?.type;
+                if (t === 'agent_message_delta') {
+                  assistantContent += String(ev.msg?.delta || '');
+                  flushSoon();
+                } else if (t === 'agent_message') {
+                  assistantContent = String(ev.msg?.message || '');
+                  try { db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+                }
+              } catch (_) { /* best-effort streaming */ }
+            });
             try {
               assistantContent = await proto.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
             } catch (err: any) {
               assistantContent = `Error: ${String(err?.message || err)}`;
             }
-            const asstMsgId = crypto.randomUUID();
-            db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
-              .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+            try { off(); } catch {}
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+            // Finalize assistant content
+            db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
             if (DEBUG) app.log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Bootstrap turn: assistant response persisted');
           } catch (_) {
             // swallow; best-effort bootstrap message
@@ -477,15 +508,44 @@ export async function buildServer(opts?: { listen?: boolean }) {
       }
 
       const runId = proto.sendUserInput(contentToSend, turnId);
+      // Insert a placeholder assistant message immediately and stream updates
+      const asstMsgId = crypto.randomUUID();
+      db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+        .run(asstMsgId, id, turnId, 'assistant', '', Date.now());
       let assistantContent = '';
+      // Throttled DB update for streaming deltas
+      let flushTimer: NodeJS.Timeout | null = null;
+      const flushMs = 200; // max ~5 updates/sec
+      const flushSoon = () => {
+        if (flushTimer) return;
+        flushTimer = setTimeout(() => {
+          try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+          flushTimer = null;
+        }, flushMs);
+      };
+
+      const off = proto.onEvent((ev) => {
+        try {
+          if (ev.id !== runId) return;
+          const t = ev.msg?.type;
+          if (t === 'agent_message_delta') {
+            assistantContent += String(ev.msg?.delta || '');
+            flushSoon();
+          } else if (t === 'agent_message') {
+            assistantContent = String(ev.msg?.message || '');
+            try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+          }
+        } catch (_) { /* best-effort streaming */ }
+      });
       try {
         assistantContent = await proto.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
       } catch (err: any) {
         assistantContent = `Error: ${String(err?.message || err)}`;
       }
-      const asstMsgId = crypto.randomUUID();
-      db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
-        .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+      try { off(); } catch {}
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      // Finalize assistant content
+      db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
       if (DEBUG) (req as any).log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Assistant message persisted');
       return reply.send({ turn_id: turnId, user_message_id: userMsgId, assistant_message_id: asstMsgId });
     } finally {
