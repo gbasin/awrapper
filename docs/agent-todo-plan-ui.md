@@ -123,13 +123,13 @@ Update rules:
 - None required server‑side; continue to read JSONL logs.
 - Client: include debug console logs behind `?debug=1` when plan UI appears/updates.
 
-## Open Questions
+## Open Questions -> Answers
 
-- Scope: Should the pinned plan show only for the active turn, or persist the last known plan until a new run starts? (Proposed: persist last known, dim when not running.)
-- History: Do we need to show prior plan snapshots (a changelog), or only the latest? (Proposed: only latest for now.)
-- Placement: Above entire transcript vs. above the latest assistant message. (Proposed: above entire transcript to make it discoverable.)
-- Threshold: Always show when present, or only when there are ≥2 steps? (Proposed: always show.)
-- Cross‑agent: If other agents later emit plan events with different shapes, do we normalize or show raw? (Proposed: normalize per agent with adapters.)
+- Scope: Should the pinned plan show only for the active turn, or persist the last known plan until a new run starts? (Proposed: persist last known, dim when not running.) -> Persist
+- History: Do we need to show prior plan snapshots (a changelog), or only the latest? (Proposed: only latest for now.) -> Latest
+- Placement: Above entire transcript vs. above the latest assistant message. (Proposed: above entire transcript to make it discoverable.) -> at bottom of transcript
+- Threshold: Always show when present, or only when there are ≥2 steps? (Proposed: always show.) -> always
+- Cross‑agent: If other agents later emit plan events with different shapes, do we normalize or show raw? (Proposed: normalize per agent with adapters.) -> normalize
 
 ## Rollout
 
