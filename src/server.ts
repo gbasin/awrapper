@@ -304,6 +304,74 @@ export async function buildServer(opts?: { listen?: boolean }) {
     if (!row) return reply.code(404).send({ error: 'not found' });
     (row as any).status = computeDisplayStatus(row as any);
     const msgs = db.prepare('select * from messages where session_id = ? order by created_at asc limit 200').all(id) as Message[];
+    const accept = String(req.headers['accept'] || '');
+    // If the client explicitly asks for HTML, serve a minimal session UI shell
+    if (accept.includes('text/html')) {
+      const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Session</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+      #log { white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; border-radius: 8px; min-height: 120px; }
+      textarea { width: 100%; min-height: 80px; }
+      button { padding: 6px 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Session</h1>
+    <div id="status"></div>
+    <div id="log"></div>
+    <div style="margin-top:12px;">
+      <textarea id="msg" placeholder="Type a message..."></textarea>
+      <div style="margin-top:8px;"><button id="send">Send</button></div>
+    </div>
+    <script>
+      const id = (function(){ try { const parts = location.pathname.split('/'); return parts[parts.length - 1] || ''; } catch { return ''; } })();
+      const statusEl = document.getElementById('status');
+      const logEl = document.getElementById('log');
+      function append(line){ logEl.textContent += (logEl.textContent ? '\n' : '') + line; logEl.scrollTop = logEl.scrollHeight; }
+
+      // Fetch session details (force JSON Accept header)
+      fetch('/sessions/' + id, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.json())
+        .then(s => { statusEl.textContent = 'Status: ' + (s.status || 'unknown'); (s.messages||[]).forEach(m => append(m.role + ': ' + m.content)); })
+        .catch(() => {});
+
+      // Simple polling for new messages using after cursor
+      let after = '';
+      function poll(){
+        return fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } })
+          .then(r => r.json())
+          .then(arr => {
+            if (Array.isArray(arr) && arr.length) {
+              // Advance cursor to the last id
+              after = arr[arr.length - 1].id || after;
+              arr.forEach(m => append(m.role + ': ' + m.content));
+            }
+            setTimeout(() => { poll().catch(() => {}); }, 1000);
+          })
+      }
+      poll().catch(() => {});
+
+      // Send message helper
+      document.getElementById('send').addEventListener('click', () => {
+        const v = String((document.getElementById('msg').value || '')).trim();
+        if (!v) return;
+        fetch('/sessions/' + id + '/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ content: v })
+        }).then(() => { (document.getElementById('msg').value = ''); }).catch(() => {});
+      });
+    </script>
+  </body>
+</html>`;
+      return reply.type('text/html').send(html);
+    }
+    // Default: JSON API response
     reply.send({ ...row, messages: msgs.slice(-20) });
   });
 

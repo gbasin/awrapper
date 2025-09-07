@@ -24,7 +24,9 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/.awrapper-worktrees/**'
+      '**/.awrapper-worktrees/**',
+      // Exclude Playwright e2e tests under the web app from Vitest collection
+      'web/tests/**'
     ]
   }
 });
