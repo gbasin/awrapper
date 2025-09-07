@@ -156,7 +156,7 @@ export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { ope
                   title={`${s.id}\n${s.repo_path}${s.branch ? ` @ ${s.branch}` : ''}`}
                   className={cn('block h-8 w-8 rounded-full border flex items-center justify-center', activeId === s.id ? 'border-slate-400 ring-2 ring-slate-200' : 'border-transparent')}
                 >
-                  <span className={cn('inline-block h-3 w-3 rounded-full', statusDot(s.status))} />
+                  {collapsedStatusIcon(s.status)}
                 </Link>
               </li>
             ))}
@@ -185,9 +185,13 @@ function timeKey(s: Session): number {
   return (s.last_activity_at ?? s.started_at ?? 0) as number
 }
 
-function statusDot(status: string) {
-  if (status === 'running') return 'bg-emerald-500'
-  if (status === 'queued') return 'bg-amber-500'
-  if (status === 'closed' || status === 'stale') return 'bg-slate-400'
-  return 'bg-slate-300'
+function collapsedStatusIcon(status: string) {
+  // Use same iconography as expanded list for consistency
+  // while keeping a compact visual for the collapsed rail.
+  const base = 'h-4 w-4'
+  if (status === 'running') return <Loader2 className={`${base} animate-spin text-emerald-600`} />
+  if (status === 'queued') return <Clock className={`${base} text-amber-600`} />
+  if (status === 'stale') return <Clock className={`${base} text-slate-500`} />
+  if (status === 'closed') return <MinusCircle className={`${base} text-slate-500`} />
+  return <HelpCircle className={`${base} text-slate-400`} />
 }
