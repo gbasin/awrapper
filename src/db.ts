@@ -62,8 +62,9 @@ function migrate(db: Database.Database) {
     const hasLifecycle = cols.some((c) => c.name === 'lifecycle');
     if (hasLifecycle) {
       db.exec('BEGIN');
+      db.exec('drop table if exists sessions_new');
       db.exec(`
-        create table if not exists sessions_new (
+        create table sessions_new (
           id text primary key,
           agent_id text not null,
           repo_path text not null,
