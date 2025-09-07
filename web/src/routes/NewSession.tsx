@@ -49,7 +49,7 @@ export default function NewSession() {
   })
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col">
       <Card className="flex-1 min-h-0">
         <CardHeader>
           <CardTitle>Start a new session</CardTitle>

@@ -83,7 +83,7 @@ export default function Session() {
   const s = sess.data!
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col">
       <Card className="flex-1 min-h-0">
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
@@ -202,7 +202,7 @@ export default function Session() {
         <CardContent className="flex flex-col min-h-0">
           <div className="mt-2 flex-1 min-h-0">
             <div className="rounded border h-full flex flex-col">
-              <ScrollArea className="flex-1 p-2 bg-slate-50">
+              <ScrollArea data-testid="messages" className="flex-1 min-h-0 p-2 bg-slate-50">
                 {msgs.isLoading ? (
                   <div className="space-y-2">
                     <Skeleton className="h-4 w-1/2" />
@@ -213,7 +213,7 @@ export default function Session() {
                 ) : (
                   <div className="space-y-1.5">
                     {msgs.data?.map((m) => (
-                      <MessageItem key={m.id} m={m} traces={tracesQ.traces} />
+                  <MessageItem key={m.id} m={m} traces={tracesQ.traces} sessionId={id} />
                     ))}
                   </div>
                 )}
@@ -264,7 +264,7 @@ export default function Session() {
   )
 }
 
-function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTrace> }) {
+function MessageItem({ m, traces, sessionId }: { m: ApiMessage; traces: Map<string, AgentTrace>; sessionId: string }) {
   const align = m.role === 'user' ? 'ml-auto' : 'mr-auto'
   const bubbleColor = m.role === 'user' ? 'bg-slate-100' : 'bg-white border'
   const Trace = m.role === 'assistant' && m.turn_id ? traces.get(m.turn_id) : undefined
@@ -273,7 +273,7 @@ function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTr
   return (
     <div className={cn('max-w-[72ch] sm:max-w-[75%] md:max-w-[65%] lg:max-w-[60%] space-y-1', align)}>
       {Trace && (
-        <TraceView trace={Trace} showAssistant={false} />
+        <TraceView trace={Trace} showAssistant={false} sessionId={sessionId} />
       )}
       <MessageBubble role={m.role} content={m.content} createdAt={m.created_at} className={bubbleClass} />
     </div>

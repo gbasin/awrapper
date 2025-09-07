@@ -39,7 +39,7 @@ export default function App() {
           <nav className="text-sm text-slate-600">{loc.pathname}</nav>
         </div>
       </header>
-      <main className={"flex-1 min-h-0 flex"}>
+      <main className={"flex-1 min-h-0 flex overflow-hidden"}>
         {/* Mobile overlay backdrop */}
         {sidebarOpen && (
           <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />

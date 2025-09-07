@@ -13,6 +13,7 @@ export type AgentTrace = {
   assistantSeq?: number
   tools: ToolCall[]
   errors: string[]
+  approvals: ApprovalRequest[]
 }
 
 export type ReasoningSection = {
@@ -41,6 +42,12 @@ export type ToolCall = {
   durationMs?: number
   fullOutput?: string
   seq?: number
+}
+
+export type ApprovalRequest = {
+  callId: string
+  changes: Record<string, any>
+  justification?: string
 }
 
 type RawEvent = {
@@ -138,6 +145,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         assistantSeq: undefined,
         tools: [],
         errors: [],
+        approvals: [],
         _toolMap: new Map(),
         _reasoningIdx: -1,
         _seq: 0,
@@ -259,6 +267,15 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         if (t.status !== 'error') t.status = 'success'
         // Ensure the assistant message appears last in the timeline
         if (t.assistant) t.assistantSeq = ++t._seq
+        break
+      }
+      case 'apply_patch_approval_request': {
+        const callId = String(e.msg?.call_id || '')
+        const changes = (e.msg?.changes && typeof e.msg.changes === 'object') ? e.msg.changes : {}
+        const justification = typeof e.msg?.justification === 'string' ? e.msg.justification : (typeof e.msg?.message === 'string' ? e.msg.message : undefined)
+        if (callId) {
+          t.approvals.push({ callId, changes, justification })
+        }
         break
       }
       default:

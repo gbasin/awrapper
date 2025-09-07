@@ -45,6 +45,8 @@ export const api = {
   },
   listMessages: (id: string) => json<Message[]>(`/sessions/${id}/messages`),
   sendMessage: (id: string, content: string) => json(`/sessions/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) }),
+  sendApproval: (id: string, body: { call_id: string; decision: 'approve' | 'deny'; scope?: 'once' | 'session' | 'path'; path?: string; reason?: string }) =>
+    json(`/sessions/${id}/approvals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) }),
   tailLog: async (id: string, tail: number | 'all' = 800) => {
     const param = typeof tail === 'number' ? String(tail) : 'all'
     const res = await fetch(`/sessions/${id}/log?tail=${param}`)

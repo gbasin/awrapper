@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:e2e": "pnpm build && playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -36,6 +38,7 @@
     "tailwind-merge": "^2.5.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/typography": "^0.5.13",
     "@types/react": "^18.2.74",
     "@types/react-dom": "^18.2.24",
