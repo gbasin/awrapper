@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react'
 import { AgentTrace, ToolCall, ReasoningSection, formatDuration } from '../../lib/agent-trace'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { CodeBlock } from '../ui/code-block'
 import { cn } from '../../lib/utils'
-import { Copy, Lightbulb, MessageSquareText, Wrench } from 'lucide-react'
+import { Copy, Lightbulb, MessageSquareText, Wrench, ChevronRight, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { toast } from 'sonner'
+import { Markdown } from '../ui/markdown'
 
 export function TraceView({ trace, className }: { trace: AgentTrace; className?: string }) {
   const [open, setOpen] = useState(false)
@@ -13,17 +13,32 @@ export function TraceView({ trace, className }: { trace: AgentTrace; className?:
 
   return (
     <div className={cn('rounded border bg-white', className)}>
-      <div className="flex items-center justify-between px-2 py-1">
-        <div className="flex items-center gap-2 text-xs text-slate-600">
-          <Badge variant={trace.status === 'running' ? 'warning' : trace.status === 'success' ? 'success' : trace.status === 'error' ? 'destructive' : 'secondary'}>
-            {trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-3 py-2 hover:bg-slate-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-300 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-sm text-slate-700">
+          <Badge
+            variant={trace.status === 'running' ? 'secondary' : trace.status === 'success' ? 'success' : trace.status === 'error' ? 'danger' : 'secondary'}
+            title={trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
+            aria-label={trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
+          >
+            {trace.status === 'running' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : trace.status === 'success' ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : trace.status === 'error' ? (
+              <XCircle className="h-3.5 w-3.5" />
+            ) : (
+              <Clock className="h-3.5 w-3.5" />
+            )}
           </Badge>
           <span>{summary}</span>
         </div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((v) => !v)}>
-          {open ? 'Hide trace' : 'Show trace'}
-        </Button>
-      </div>
+        <ChevronRight className={cn('h-4 w-4 text-slate-600 transition-transform', open && 'rotate-90')} />
+      </button>
       {open && (
         <div className="border-t">
           <div className="max-h-96 overflow-y-auto p-2 space-y-2 bg-slate-50">
@@ -37,7 +52,7 @@ export function TraceView({ trace, className }: { trace: AgentTrace; className?:
               </div>
             )}
           </div>
-          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-white px-2 py-1 text-xs text-slate-600">
+          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t bg-white px-3 py-2 text-xs text-slate-600">
             <div className="flex items-center gap-2">
               <span>Tokens:</span>
               {trace.tokens ? (
@@ -95,15 +110,20 @@ function getSeq(it: { kind: 'reasoning'; section: ReasoningSection } | { kind: '
 function ReasoningItem({ section }: { section: ReasoningSection }) {
   const [open, setOpen] = useState(false)
   return (
-    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
-      <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      className="rounded border bg-white [&>summary::-webkit-details-marker]:hidden"
+    >
+      <summary className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer select-none hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-slate-300 transition-colors">
         <Lightbulb className="h-4 w-4 text-amber-500" />
         <span className="font-medium">{section.title || `Reasoning (${section.text.length} chars)`}</span>
+        <ChevronRight className={cn('ml-auto h-4 w-4 text-slate-600 transition-transform', open && 'rotate-90')} />
       </summary>
       {open && (
         <div className="border-t p-2">
           <div className="relative">
-            <CodeBlock code={section.text} className="text-[11px]" />
+            <Markdown className="text-[13px] leading-5 text-slate-800">{section.text}</Markdown>
             <CopyButton text={section.text} className="absolute right-2 top-2" />
           </div>
         </div>
@@ -114,7 +134,7 @@ function ReasoningItem({ section }: { section: ReasoningSection }) {
 
 function ToolItem({ tool }: { tool: ToolCall }) {
   const [open, setOpen] = useState(false)
-  const status = tool.exitCode == null ? 'Running' : tool.exitCode === 0 ? 'Succeeded' : 'Failed'
+  const statusText = tool.exitCode == null ? 'Running' : tool.exitCode === 0 ? 'Succeeded' : 'Failed'
   const dur = formatDuration(tool.durationMs)
   const lines = tool.fullOutput ? String(tool.fullOutput).split(/\r?\n/).length : 0
   const meta: string[] = []
@@ -122,14 +142,30 @@ function ToolItem({ tool }: { tool: ToolCall }) {
   if (dur) meta.push(dur)
   if (lines) meta.push(`${lines} lines`)
   return (
-    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
-      <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      className="rounded border bg-white [&>summary::-webkit-details-marker]:hidden"
+    >
+      <summary className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer select-none hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-slate-300 transition-colors">
         <Wrench className="h-4 w-4 text-slate-700" />
         <span className="font-medium">{collapsedToolLabel(tool)}</span>
         <span className="text-slate-500">{meta.length ? `(${meta.join(' • ')})` : ''}</span>
-        <Badge className="ml-2" variant={tool.exitCode == null ? 'warning' : tool.exitCode === 0 ? 'success' : 'destructive'}>
-          {status}
+        <Badge
+          className="ml-2"
+          variant={tool.exitCode == null ? 'secondary' : tool.exitCode === 0 ? 'success' : 'danger'}
+          title={statusText}
+          aria-label={statusText}
+        >
+          {tool.exitCode == null ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : tool.exitCode === 0 ? (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          ) : (
+            <XCircle className="h-3.5 w-3.5" />
+          )}
         </Badge>
+        <ChevronRight className={cn('ml-auto h-4 w-4 text-slate-600 transition-transform', open && 'rotate-90')} />
       </summary>
       {open && (
         <div className="border-t p-2">
@@ -153,15 +189,20 @@ function collapsedToolLabel(t: ToolCall): string {
 function AssistantItem({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <details open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)} className="rounded border bg-white">
-      <summary className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none">
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      className="rounded border bg-white [&>summary::-webkit-details-marker]:hidden"
+    >
+      <summary className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer select-none hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-slate-300 transition-colors">
         <MessageSquareText className="h-4 w-4 text-slate-700" />
         <span className="font-medium">Assistant message ({text.length} chars)</span>
+        <ChevronRight className={cn('ml-auto h-4 w-4 text-slate-600 transition-transform', open && 'rotate-90')} />
       </summary>
       {open && (
         <div className="border-t p-2">
           <div className="relative">
-            <CodeBlock code={text} className="text-[11px]" />
+            <Markdown className="text-[13px] leading-5 text-slate-800">{text}</Markdown>
             <CopyButton text={text} className="absolute right-2 top-2" />
           </div>
         </div>
@@ -174,14 +215,16 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   return (
     <Button
       type="button"
-      size="sm"
+      size="icon"
       variant="secondary"
-      className={className}
+      className={cn('h-7 w-7 p-0', className)}
+      title="Copy to clipboard"
+      aria-label="Copy to clipboard"
       onClick={() => {
         navigator.clipboard.writeText(text || '').then(() => toast.success('Copied'))
       }}
     >
-      <Copy className="mr-2 h-3 w-3" /> Copy
+      <Copy className="h-3.5 w-3.5" />
     </Button>
   )
 }

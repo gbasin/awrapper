@@ -17,7 +17,7 @@ export function CodeBlock({ code, lang, className }: { code: string; lang?: stri
   }, [code, lang])
 
   return (
-    <pre className={cn('mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs', className)}>
+    <pre className={cn('mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs inline-block max-w-full', className)}>
       <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
     </pre>
   )
@@ -26,4 +26,3 @@ export function CodeBlock({ code, lang, className }: { code: string; lang?: stri
 function escapeHtml(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
-

@@ -11,6 +11,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
 import { Skeleton } from '../components/ui/skeleton'
+import { Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
 
 export default function Home() {
   const qc = useQueryClient()
@@ -124,8 +125,22 @@ function SessionsTable({ rows }: { rows: Session[] }) {
               </Td>
               <Td>{s.agent_id}</Td>
               <Td>
-                <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
-                  {s.status}
+                <Badge
+                  variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
+                  title={s.status}
+                  aria-label={s.status}
+                >
+                  {s.status === 'running' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : s.status === 'queued' ? (
+                    <Clock className="h-3.5 w-3.5" />
+                  ) : s.status === 'closed' ? (
+                    <MinusCircle className="h-3.5 w-3.5" />
+                  ) : s.status === 'stale' ? (
+                    <Clock className="h-3.5 w-3.5" />
+                  ) : (
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  )}
                 </Badge>
               </Td>
               <Td className="text-slate-500">{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</Td>

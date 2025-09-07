@@ -10,11 +10,11 @@ import { Button } from '../components/ui/button'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '../components/ui/dialog'
-import { Copy, Send, Trash2, Download } from 'lucide-react'
+import { Copy, Send, Trash2, Download, Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
 import { Skeleton } from '../components/ui/skeleton'
 import { cn } from '../lib/utils'
 import { toast } from 'sonner'
-import { CodeBlock } from '../components/ui/code-block'
+import { Markdown } from '../components/ui/markdown'
 import { Switch } from '../components/ui/switch'
 import { useAgentTraces, type AgentTrace } from '../lib/agent-trace'
 import { TraceView } from '../components/trace/TraceView'
@@ -89,8 +89,22 @@ export default function Session() {
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-3">
               <span className="truncate">{s.id}</span>
-              <Badge variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}>
-                {s.status}
+              <Badge
+                variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
+                title={s.status}
+                aria-label={s.status}
+              >
+                {s.status === 'running' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : s.status === 'queued' ? (
+                  <Clock className="h-3.5 w-3.5" />
+                ) : s.status === 'closed' ? (
+                  <MinusCircle className="h-3.5 w-3.5" />
+                ) : s.status === 'stale' ? (
+                  <Clock className="h-3.5 w-3.5" />
+                ) : (
+                  <HelpCircle className="h-3.5 w-3.5" />
+                )}
               </Badge>
             </CardTitle>
             <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
@@ -124,7 +138,10 @@ export default function Session() {
                     <Button
                       type="button"
                       variant="secondary"
-                      size="sm"
+                      size="icon"
+                      className="h-7 w-7 p-0"
+                      title="Copy to clipboard"
+                      aria-label="Copy to clipboard"
                       onClick={() => {
                         const text = log.data ?? ''
                         if (!text) return
@@ -132,7 +149,7 @@ export default function Session() {
                       }}
                       disabled={log.isLoading || !log.data}
                     >
-                      <Copy className="mr-2 h-3 w-3" /> Copy
+                      <Copy className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       type="button"
@@ -262,48 +279,12 @@ function MessageItem({ m, traces }: { m: ApiMessage; traces: Map<string, AgentTr
 }
 
 function MessageBubble({ role, content, createdAt, className }: { role: 'user' | 'assistant'; content: string; createdAt: number; className?: string }) {
-  const segments = useMemo(() => parseSegments(content), [content])
   return (
     <div className={cn('rounded-md py-1.5 px-3', className)}>
       <div className="mb-1 text-[10px] leading-4 text-slate-500">[{new Date(createdAt).toLocaleTimeString()}] {role}</div>
-      <div className="space-y-1.5">
-        {segments.map((seg, i) => (
-          seg.type === 'code' ? (
-            <div key={i} className="relative">
-              <CodeBlock code={seg.content} lang={seg.lang} />
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="absolute right-2 top-2"
-                onClick={() => {
-                  navigator.clipboard.writeText(seg.content).then(() => toast.success('Code copied'))
-                }}
-              >
-                <Copy className="mr-2 h-3 w-3" /> Copy
-              </Button>
-            </div>
-          ) : (
-            <p key={i} className="whitespace-pre-wrap text-[13px] leading-5">{seg.content}</p>
-          )
-        ))}
-      </div>
+      <Markdown className="text-[13px] leading-5" >{content}</Markdown>
     </div>
   )
-}
-
-function parseSegments(s: string): Array<{ type: 'text'; content: string } | { type: 'code'; lang?: string; content: string }> {
-  const segments: Array<{ type: 'text'; content: string } | { type: 'code'; lang?: string; content: string }> = []
-  const re = /```([\w+-]*)?\n([\s\S]*?)```/g
-  let last = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(s))) {
-    if (m.index > last) segments.push({ type: 'text', content: s.slice(last, m.index) })
-    segments.push({ type: 'code', lang: m[1] || '', content: m[2] })
-    last = re.lastIndex
-  }
-  if (last < s.length) segments.push({ type: 'text', content: s.slice(last) })
-  return segments
 }
 
 // Progressive, bottom-first logs renderer that backfills older lines in batches.
