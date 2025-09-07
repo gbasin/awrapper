@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import App from './App'
 import './styles/globals.css'
-import 'highlight.js/styles/github-dark.css'
+import 'katex/dist/katex.min.css'
 
 const qc = new QueryClient()
 

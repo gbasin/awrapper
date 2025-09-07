@@ -6,10 +6,10 @@ import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { Skeleton } from './ui/skeleton'
 import { cn } from '../lib/utils'
-import { PanelLeftClose, Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
-import { useCallback, useEffect, useRef } from 'react'
+import { PanelLeftClose, PanelLeftOpen, Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
+import { useCallback, useRef } from 'react'
 
-export function SessionSidebar({ open, onClose, width, onResize }: { open: boolean; onClose: () => void; width: number; onResize: (w: number) => void }) {
+export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { open: boolean; onClose: () => void; onOpen: () => void; width: number; onResize: (w: number) => void }) {
   const loc = useLocation()
   const q = useQuery({ queryKey: ['sessions'], queryFn: () => api.listSessions(), staleTime: 5000, refetchInterval: 10000 })
   const activeId = loc.pathname.startsWith('/s/') ? loc.pathname.split('/')[2] : null
@@ -62,6 +62,9 @@ export function SessionSidebar({ open, onClose, width, onResize }: { open: boole
         <div className="h-14 px-3 border-b flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-800">Sessions</div>
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={onClose} title="Collapse sidebar" aria-label="Collapse sidebar">
+              <PanelLeftClose className="h-4 w-4" />
+            </Button>
             <Link to="/new">
               <Button size="sm" variant={loc.pathname === '/new' ? 'default' : 'secondary'}>New</Button>
             </Link>
@@ -87,7 +90,6 @@ export function SessionSidebar({ open, onClose, width, onResize }: { open: boole
                     <li key={s.id}>
                       <Link to={`/s/${s.id}`} className={itemClass(activeId === s.id)}>
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="truncate text-xs font-medium">{s.id}</span>
                           <Badge
                             variant={badgeVariant(s.status)}
                             className="shrink-0 text-[10px]"
@@ -106,8 +108,11 @@ export function SessionSidebar({ open, onClose, width, onResize }: { open: boole
                               <HelpCircle className="h-3 w-3" />
                             )}
                           </Badge>
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-medium">{s.id}</div>
+                            <div className="truncate text-[10px] text-slate-500">{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</div>
+                          </div>
                         </div>
-                        <div className="truncate text-[10px] text-slate-500">{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</div>
                       </Link>
                     </li>
                   ))}
@@ -130,6 +135,9 @@ export function SessionSidebar({ open, onClose, width, onResize }: { open: boole
       <div className={cn('hidden md:flex h-full flex-col items-center gap-2 py-2', open ? 'md:hidden' : 'md:flex')}
         aria-label="Session status rail"
       >
+        <Button variant="ghost" size="icon" onClick={onOpen} title="Expand sidebar" aria-label="Expand sidebar">
+          <PanelLeftOpen className="h-4 w-4" />
+        </Button>
         {q.isLoading && (
           <div className="flex flex-col items-center gap-2">
             <Skeleton className="h-3 w-3 rounded-full" />

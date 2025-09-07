@@ -4,7 +4,7 @@ import Session from './routes/Session'
 import NewSession from './routes/NewSession'
 import { SessionSidebar } from './components/SessionSidebar'
 import { Button } from './components/ui/button'
-import { PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { PanelLeftOpen } from 'lucide-react'
 
 export default function App() {
   const loc = useLocation()
@@ -31,8 +31,8 @@ export default function App() {
       <header className="border-b">
         <div className="px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSidebarOpen((v) => !v)} title="Toggle sidebar" aria-label="Toggle sidebar">
-              {sidebarOpen ? <><PanelLeftClose className="h-4 w-4" /></> : <><PanelLeftOpen className="h-4 w-4" /></>}
+            <Button className="md:hidden" variant="ghost" size="sm" onClick={() => setSidebarOpen(true)} title="Open sidebar" aria-label="Open sidebar">
+              <PanelLeftOpen className="h-4 w-4" />
             </Button>
             <Link to="/" className="font-semibold">awrapper</Link>
           </div>
@@ -47,6 +47,7 @@ export default function App() {
         <SessionSidebar
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
+          onOpen={() => setSidebarOpen(true)}
           width={sidebarWidth}
           onResize={(w) => setSidebarWidth(Math.max(220, Math.min(520, Math.round(w))))}
         />

@@ -1,9 +1,13 @@
 import React from 'react'
-import ReactMarkdown from 'react-markdown'
+// Use the hooks-based async renderer so async rehype plugins work client-side
+import { MarkdownHooks as ReactMarkdown } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { CodeBlock } from './code-block'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import rehypePrettyCode from 'rehype-pretty-code'
 import { Button } from './button'
 import { Copy } from 'lucide-react'
+import { cn } from '../../lib/utils'
 
 type MarkdownProps = {
   className?: string
@@ -14,12 +18,17 @@ type MarkdownProps = {
 export function Markdown({ className, children }: MarkdownProps) {
   return (
     <ReactMarkdown
-      className={['prose prose-slate max-w-none prose-pre:p-0 prose-code:before:content-[none] prose-code:after:content-[none]', className].filter(Boolean).join(' ')}
-      // GFM adds tables, strikethrough, task lists, autolinks
-      remarkPlugins={[remarkGfm]}
-      // Note: do not enable raw HTML for safety; default escapes HTML
+      className={cn(
+        'prose prose-slate dark:prose-invert max-w-none prose-pre:p-0 prose-code:before:content-[none] prose-code:after:content-[none]',
+        className,
+      )}
+      // GitHub-flavored markdown + math
+      remarkPlugins={[remarkGfm, remarkMath]}
+      // Math and Shiki-based highlighting via rehype-pretty-code
+      rehypePlugins={[[rehypeKatex], [rehypePrettyCode, prettyCodeOptions as any]]}
+      // HTML remains escaped (no rehype-raw) for safety
       components={{
-        // Headings and paragraphs get compact spacing for chat bubbles
+        // Compact spacing for chat bubbles
         h1: ({ node, ...props }) => <h1 {...props} className="text-lg mt-2 mb-1" />,
         h2: ({ node, ...props }) => <h2 {...props} className="text-base mt-2 mb-1" />,
         h3: ({ node, ...props }) => <h3 {...props} className="text-sm mt-2 mb-1" />,
@@ -27,19 +36,60 @@ export function Markdown({ className, children }: MarkdownProps) {
         ul: ({ node, ...props }) => <ul {...props} className="my-1 list-disc pl-5" />,
         ol: ({ node, ...props }) => <ol {...props} className="my-1 list-decimal pl-5" />,
         a: ({ node, ...props }) => <a {...props} className="underline underline-offset-2" target="_blank" rel="noreferrer" />,
-        code({ node, inline, className, children, ...props }) {
-          const txt = String(children || '')
-          const lang = /language-([\w+-]+)/.exec(className || '')?.[1]
-          if (inline) {
+        code({ inline, className, children, ...props }) {
+          const raw = String(children || '')
+          const text = raw.replace(/\n+$/, '')
+          const isOneLineFenced = !inline && !text.includes('\n')
+
+          // Inline code and one-line fenced blocks → compact chip, same size as text
+          if (inline || isOneLineFenced) {
             return (
-              <code {...props} className="mono rounded bg-slate-100 px-1 py-0.5 text-[12px]">
-                {txt}
+              <code
+                {...props}
+                data-inline-chip
+                className="mono rounded bg-slate-100 dark:bg-slate-800 px-1 py-[1px] text-[1em] cursor-pointer"
+                title="Click to copy"
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  navigator.clipboard.writeText(text).catch(() => {/* ignore */})
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    navigator.clipboard.writeText(text).catch(() => {/* ignore */})
+                    e.preventDefault()
+                  }
+                }}
+              >
+                {text}
               </code>
             )
           }
+
+          // Multi-line fenced code: let rehype-pretty-code produce the inner markup
+          return <code {...props} className={className}>{children}</code>
+        },
+        pre({ children, ...props }) {
+          // If the child code element flagged itself as an inline chip, render it directly
+          const kids = React.Children.toArray(children)
+          if (
+            kids.length === 1 &&
+            React.isValidElement(kids[0]) &&
+            (kids[0] as any).props?.['data-inline-chip']
+          ) {
+            return <>{kids[0]}</>
+          }
+
+          const ref = React.useRef<HTMLPreElement>(null)
           return (
-            <div className="relative inline-block max-w-full">
-              <CodeBlock code={txt.replace(/\n$/, '')} lang={lang} className="mt-1" />
+            <div className="relative">
+              <pre
+                ref={ref}
+                {...props}
+                className={cn('mono whitespace-pre-wrap rounded bg-slate-900 text-slate-100 text-xs p-3 overflow-x-auto inline-block max-w-full', (props as any).className)}
+              >
+                {children}
+              </pre>
               <Button
                 type="button"
                 size="icon"
@@ -48,17 +98,14 @@ export function Markdown({ className, children }: MarkdownProps) {
                 title="Copy to clipboard"
                 aria-label="Copy to clipboard"
                 onClick={() => {
-                  navigator.clipboard.writeText(txt).catch(() => {/* ignore */})
+                  const text = ref.current?.innerText || ''
+                  navigator.clipboard.writeText(text).catch(() => {/* ignore */})
                 }}
               >
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </div>
           )
-        },
-        pre({ node, className, children, ...props }) {
-          // Handled by code() above to avoid double-wrapping
-          return <>{children}</>
         },
         table: ({ node, ...props }) => (
           <div className="overflow-x-auto my-2">
@@ -70,4 +117,12 @@ export function Markdown({ className, children }: MarkdownProps) {
       {children}
     </ReactMarkdown>
   )
+}
+
+const prettyCodeOptions = {
+  theme: {
+    light: 'github-light',
+    dark: 'github-dark',
+  },
+  keepBackground: false,
 }
