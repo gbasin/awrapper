@@ -170,8 +170,8 @@ function ToolItem({ tool }: { tool: ToolCall }) {
       {open && (
         <div className="border-t p-2">
           {tool.cwd && <div className="mb-1 text-xs text-slate-500">cwd: {tool.cwd}</div>}
-          <div className="relative">
-            <pre className="mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs">{tool.fullOutput || ''}</pre>
+          <div className="relative inline-block max-w-full">
+            <pre className="mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs inline-block max-w-full">{tool.fullOutput || ''}</pre>
             <CopyButton text={tool.fullOutput || ''} className="absolute right-2 top-2" />
           </div>
         </div>
@@ -217,14 +217,14 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       type="button"
       size="icon"
       variant="secondary"
-      className={cn('h-7 w-7 p-0', className)}
+      className={cn('h-5 w-5 p-0', className)}
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
       onClick={() => {
         navigator.clipboard.writeText(text || '').then(() => toast.success('Copied'))
       }}
     >
-      <Copy className="h-3.5 w-3.5" />
+      <Copy className="h-3 w-3" />
     </Button>
   )
 }

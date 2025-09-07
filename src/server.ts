@@ -193,20 +193,25 @@ export async function buildServer(opts?: { listen?: boolean }) {
             db4.prepare('update sessions set last_activity_at = ? where id = ?').run(now, id);
 
             const runId = proto.sendUserInput(text, turnId);
-            // Insert a placeholder assistant message immediately and stream updates
-            const asstMsgId = crypto.randomUUID();
-            db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
-              .run(asstMsgId, id, turnId, 'assistant', '', Date.now());
-
-            // Stream assistant deltas into the placeholder row
+            // Stream assistant deltas and persist once content is available
             let assistantContent = '';
+            let asstMsgId: string | null = null;
             // Throttled DB update for streaming deltas
             let flushTimer: NodeJS.Timeout | null = null;
             const flushMs = 200; // max ~5 updates/sec
             const flushSoon = () => {
               if (flushTimer) return;
               flushTimer = setTimeout(() => {
-                try { db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+                try {
+                  if (!asstMsgId && assistantContent) {
+                    // Create assistant row on first content
+                    asstMsgId = crypto.randomUUID();
+                    db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+                      .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+                  } else if (asstMsgId) {
+                    db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
+                  }
+                } catch {}
                 flushTimer = null;
               }, flushMs);
             };
@@ -220,7 +225,15 @@ export async function buildServer(opts?: { listen?: boolean }) {
                   flushSoon();
                 } else if (t === 'agent_message') {
                   assistantContent = String(ev.msg?.message || '');
-                  try { db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+                  try {
+                    if (!asstMsgId) {
+                      asstMsgId = crypto.randomUUID();
+                      db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+                        .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+                    } else {
+                      db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
+                    }
+                  } catch {}
                 }
               } catch (_) { /* best-effort streaming */ }
             });
@@ -231,8 +244,16 @@ export async function buildServer(opts?: { listen?: boolean }) {
             }
             try { off(); } catch {}
             if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-            // Finalize assistant content
-            db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
+            // Finalize assistant content: ensure row exists
+            try {
+              if (!asstMsgId && assistantContent) {
+                asstMsgId = crypto.randomUUID();
+                db4.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
+                  .run(asstMsgId, id, turnId, 'assistant', assistantContent, Date.now());
+              } else if (asstMsgId) {
+                db4.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
+              }
+            } catch {}
             if (DEBUG) app.log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Bootstrap turn: assistant response persisted');
           } catch (_) {
             // swallow; best-effort bootstrap message

@@ -82,7 +82,7 @@ export function Markdown({ className, children }: MarkdownProps) {
 
           const ref = React.useRef<HTMLPreElement>(null)
           return (
-            <div className="relative">
+            <div className="relative inline-block max-w-full">
               <pre
                 ref={ref}
                 {...props}
@@ -94,7 +94,7 @@ export function Markdown({ className, children }: MarkdownProps) {
                 type="button"
                 size="icon"
                 variant="secondary"
-                className="absolute right-2 top-2 h-7 w-7 p-0"
+                className="absolute right-2 top-2 h-5 w-5 p-0"
                 title="Copy to clipboard"
                 aria-label="Copy to clipboard"
                 onClick={() => {
@@ -102,7 +102,7 @@ export function Markdown({ className, children }: MarkdownProps) {
                   navigator.clipboard.writeText(text).catch(() => {/* ignore */})
                 }}
               >
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-3 w-3" />
               </Button>
             </div>
           )
