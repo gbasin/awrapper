@@ -45,7 +45,6 @@ If future builds use a different type name (e.g., task_plan), we will map both t
 
 ## Current Behavior (baseline)
 
-- Legacy session page (`src/server.ts` embedded script) groups unknown events under “Other Events” with a raw JSON expansion. Plan updates would appear there but aren’t extracted or summarized.
 - SPA (web) ignores unknown event types entirely in `web/src/lib/agent-trace.ts`. No plan is visible.
 
 ## UI Design

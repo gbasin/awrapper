@@ -29,14 +29,14 @@ export default function App() {
   return (
     <div className="h-full flex flex-col bg-white text-slate-900">
       <header className="border-b">
-        <div className="px-4 h-14 flex items-center justify-between gap-3">
+        <div className="px-3 h-10 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Button className="md:hidden" variant="ghost" size="sm" onClick={() => setSidebarOpen(true)} title="Open sidebar" aria-label="Open sidebar">
               <PanelLeftOpen className="h-4 w-4" />
             </Button>
             <Link to="/" className="font-semibold">awrapper</Link>
           </div>
-          <nav className="text-sm text-slate-600">{loc.pathname}</nav>
+          <nav className="text-xs text-slate-600">{loc.pathname}</nav>
         </div>
       </header>
       <main className={"flex-1 min-h-0 flex overflow-hidden"}>
@@ -51,7 +51,7 @@ export default function App() {
           width={sidebarWidth}
           onResize={(w) => setSidebarWidth(Math.max(220, Math.min(520, Math.round(w))))}
         />
-        <div className={'flex-1 min-h-0 flex flex-col px-4 py-4'}>
+        <div className={'flex-1 min-h-0 flex flex-col px-3 py-2'}>
           <Routes>
             <Route path="/" element={<Navigate to="/new" replace />} />
             <Route path="/new" element={<NewSession />} />
