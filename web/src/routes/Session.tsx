@@ -139,7 +139,7 @@ export default function Session() {
                       type="button"
                       variant="secondary"
                       size="icon"
-                      className="h-7 w-7 p-0"
+                      className="h-5 w-5 p-0"
                       title="Copy to clipboard"
                       aria-label="Copy to clipboard"
                       onClick={() => {
@@ -149,7 +149,7 @@ export default function Session() {
                       }}
                       disabled={log.isLoading || !log.data}
                     >
-                      <Copy className="h-3.5 w-3.5" />
+                      <Copy className="h-3 w-3" />
                     </Button>
                     <Button
                       type="button"
