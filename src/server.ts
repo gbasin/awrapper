@@ -141,7 +141,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir);
 
-    {
+    try {
       db.prepare('update sessions set status = ? where id = ?').run('starting', id);
       const { proc } = await spawnPersistentCodex({ worktree: worktree_path });
       db.prepare('update sessions set status = ?, pid = ? where id = ?').run('running', proc!.pid, id);
@@ -194,6 +194,19 @@ export async function buildServer(opts?: { listen?: boolean }) {
         procs.delete(id);
         protoSessions.delete(id);
       });
+    } catch (err: any) {
+      const msg = String(err?.shortMessage || err?.message || err || 'Failed to start agent');
+      const hint = err?.code === 'ENOENT'
+        ? 'codex binary not found. Install Codex CLI or set CODEX_BIN.'
+        : (!process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY may be missing for the Codex process.' : undefined);
+      const full = hint ? `${msg} (${hint})` : msg;
+      db.prepare('update sessions set status = ?, error_message = ? where id = ?').run('error', full, id);
+      (req as any).log.error({ err: msg, id }, 'Failed to spawn persistent Codex agent');
+      const ctype2 = String(req.headers['content-type'] || '');
+      if (ctype2.includes('application/x-www-form-urlencoded')) {
+        return reply.redirect(`/sessions/${id}`, 303);
+      }
+      return reply.code(500).send({ error: 'Failed to start agent process', message: full, id });
     }
 
     const ctype = String(req.headers['content-type'] || '');
@@ -419,8 +432,14 @@ export async function buildServer(opts?: { listen?: boolean }) {
           proto = revived;
           revivedNow = true;
         } catch (e: any) {
-          (req as any).log.warn({ id, err: String(e?.message || e) }, 'Failed to revive session process');
-          return reply.code(503).send({ error: 'session process not available' });
+          const msg = String(e?.shortMessage || e?.message || e || 'Failed to revive agent');
+          const hint = e?.code === 'ENOENT'
+            ? 'codex binary not found. Install Codex CLI or set CODEX_BIN.'
+            : (!process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY may be missing for the Codex process.' : undefined);
+          const full = hint ? `${msg} (${hint})` : msg;
+          db.prepare('update sessions set status = ?, error_message = ? where id = ?').run('error', full, id);
+          (req as any).log.warn({ id, err: msg }, 'Failed to revive session process');
+          return reply.code(503).send({ error: 'Failed to revive agent process', message: full });
         }
       }
       // Persist user message
