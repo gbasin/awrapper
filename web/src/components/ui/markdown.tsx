@@ -81,15 +81,21 @@ export function Markdown({ className, children }: MarkdownProps) {
           }
 
           const ref = React.useRef<HTMLPreElement>(null)
+          const [hasText, setHasText] = React.useState(true)
+          React.useEffect(() => {
+            const t = (ref.current?.innerText || '').trim()
+            setHasText(t.length > 0)
+          }, [children])
           return (
             <div className="relative inline-block max-w-full">
               <pre
                 ref={ref}
                 {...props}
-                className={cn('mono whitespace-pre-wrap rounded bg-slate-900 text-slate-100 text-xs p-3 overflow-x-auto inline-block max-w-full', (props as any).className)}
+                className={cn('mono whitespace-pre-wrap rounded bg-slate-900 text-slate-100 text-xs p-3 overflow-x-auto inline-block max-w-full', !hasText && 'hidden', (props as any).className)}
               >
                 {children}
               </pre>
+              {hasText && (
               <Button
                 type="button"
                 size="icon"
@@ -104,6 +110,7 @@ export function Markdown({ className, children }: MarkdownProps) {
               >
                 <Copy className="h-3 w-3" />
               </Button>
+              )}
             </div>
           )
         },

@@ -141,6 +141,8 @@ function ToolItem({ tool }: { tool: ToolCall }) {
   if (tool.exitCode != null) meta.push(`exit ${tool.exitCode}`)
   if (dur) meta.push(dur)
   if (lines) meta.push(`${lines} lines`)
+  const output = String(tool.fullOutput || '')
+  const hasOutput = output.trim().length > 0
   return (
     <details
       open={open}
@@ -170,10 +172,12 @@ function ToolItem({ tool }: { tool: ToolCall }) {
       {open && (
         <div className="border-t p-2">
           {tool.cwd && <div className="mb-1 text-xs text-slate-500">cwd: {tool.cwd}</div>}
-          <div className="relative inline-block max-w-full">
-            <pre className="mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs inline-block max-w-full">{tool.fullOutput || ''}</pre>
-            <CopyButton text={tool.fullOutput || ''} className="absolute right-2 top-2" />
-          </div>
+          {hasOutput && (
+            <div className="relative inline-block max-w-full">
+              <pre className="mono whitespace-pre-wrap rounded bg-slate-900 p-3 text-slate-100 text-xs inline-block max-w-full">{output}</pre>
+              <CopyButton text={output} className="absolute right-2 top-2" />
+            </div>
+          )}
         </div>
       )}
     </details>
@@ -212,6 +216,8 @@ function AssistantItem({ text }: { text: string }) {
 }
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
+  const trimmed = (text || '').trim()
+  if (!trimmed) return null
   return (
     <Button
       type="button"
@@ -221,7 +227,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       title="Copy to clipboard"
       aria-label="Copy to clipboard"
       onClick={() => {
-        navigator.clipboard.writeText(text || '').then(() => toast.success('Copied'))
+        navigator.clipboard.writeText(trimmed).then(() => toast.success('Copied'))
       }}
     >
       <Copy className="h-3 w-3" />
