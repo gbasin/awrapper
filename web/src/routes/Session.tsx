@@ -10,13 +10,13 @@ import { Button } from '../components/ui/button'
 import { ScrollArea } from '../components/ui/scroll-area'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../components/ui/alert-dialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '../components/ui/dialog'
-import { Copy, Send, Trash2, Download, Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
+import { Copy, Send, Trash2, Download, Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2, Circle, ChevronRight } from 'lucide-react'
 import { Skeleton } from '../components/ui/skeleton'
 import { cn } from '../lib/utils'
 import { toast } from 'sonner'
 import { Markdown } from '../components/ui/markdown'
 import { Switch } from '../components/ui/switch'
-import { useAgentTraces, type AgentTrace } from '../lib/agent-trace'
+import { useAgentTraces, type AgentTrace, type PlanState } from '../lib/agent-trace'
 import { TraceView } from '../components/trace/TraceView'
 
 export default function Session() {
@@ -81,6 +81,7 @@ export default function Session() {
   if (sess.isLoading) return <div>Loading…</div>
   if (sess.error) return <div className="text-red-600">Failed to load session</div>
   const s = sess.data!
+  const planCtx = useMemo(() => selectCurrentPlan(tracesQ.traces), [tracesQ.traces])
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -215,6 +216,13 @@ export default function Session() {
                     {msgs.data?.map((m) => (
                   <MessageItem key={m.id} m={m} traces={tracesQ.traces} sessionId={id} />
                     ))}
+                    {planCtx && planCtx.plan?.items?.length ? (
+                      <PlanPinned
+                        plan={planCtx.plan}
+                        active={planCtx.trace.status === 'running'}
+                        sessionId={id}
+                      />
+                    ) : null}
                   </div>
                 )}
               </ScrollArea>
@@ -367,5 +375,90 @@ function BackfillLogViewer({ text, wrap, follow, viewportRef }: { text: string; 
     <pre className={cn('mono text-xs', wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')}>
       {visible}
     </pre>
+  )
+}
+
+// Select the current plan to display: prefer a running trace with a plan; otherwise
+// the most recent trace (by plan.updatedAt/completedAt/startedAt) that has a plan.
+function selectCurrentPlan(traces: Map<string, AgentTrace> | undefined): { trace: AgentTrace; plan: PlanState } | undefined {
+  if (!traces || traces.size === 0) return undefined
+  const arr = Array.from(traces.values()).filter((t) => t.plan && t.plan.items && t.plan.items.length > 0) as Array<AgentTrace & { plan: PlanState }>
+  if (arr.length === 0) return undefined
+  const running = arr.filter((t) => t.status === 'running')
+  const pickFrom = running.length ? running : arr
+  pickFrom.sort((a, b) => ((b.plan?.updatedAt ?? b.completedAt ?? b.startedAt ?? 0) - (a.plan?.updatedAt ?? a.completedAt ?? a.startedAt ?? 0)))
+  return { trace: pickFrom[0], plan: pickFrom[0].plan }
+}
+
+function PlanPinned({ plan, active, sessionId }: { plan: PlanState; active: boolean; sessionId: string }) {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      if (active) return true
+      const v = localStorage.getItem(`awrapper:planCollapsed:${sessionId}`)
+      return v ? v !== '1' : true
+    } catch {
+      return true
+    }
+  })
+  const items = plan.items || []
+  const counts = items.reduce(
+    (acc, it) => {
+      if (it.status === 'completed') acc.completed++
+      else if (it.status === 'in_progress') acc.in_progress++
+      else acc.pending++
+      return acc
+    },
+    { completed: 0, in_progress: 0, pending: 0 }
+  )
+  const debug = (() => { try { return /[?&]debug=1/.test(location.search) } catch { return false } })()
+  useEffect(() => {
+    if (debug) console.log('[plan-ui] plan updated', { active, counts, updatedAt: plan.updatedAt })
+  }, [debug, plan?.updatedAt, active])
+  useEffect(() => {
+    try { localStorage.setItem(`awrapper:planCollapsed:${sessionId}`, open ? '0' : '1') } catch {}
+  }, [open, sessionId])
+
+  return (
+    <div className="rounded border bg-white">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-300"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="flex items-center gap-2 text-slate-800">
+          <span className="font-medium">Task Plan</span>
+          <span className="text-slate-500">• Completed {counts.completed} • In Progress {counts.in_progress} • Pending {counts.pending}</span>
+          {active ? <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" aria-label="Plan updating" /> : null}
+        </div>
+        <ChevronRight className={cn('h-4 w-4 text-slate-600 transition-transform', open && 'rotate-90')} />
+      </button>
+      {open && (
+        <div className="border-t p-2">
+          {plan.explanation ? (
+            <div className="mb-1 text-xs text-slate-600">{plan.explanation}</div>
+          ) : null}
+          <ol aria-live="polite" className="space-y-1">
+            {items.map((it, idx) => {
+              const isDone = it.status === 'completed'
+              const isActive = it.status === 'in_progress'
+              const isPending = it.status === 'pending'
+              return (
+                <li key={idx} className="flex items-start gap-2 text-[13px] leading-5">
+                  {isDone ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5" aria-label="Completed" />
+                  ) : isActive ? (
+                    <Loader2 className="h-4 w-4 text-amber-600 animate-spin mt-0.5" aria-label="In progress" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-slate-400 mt-0.5" aria-label="Pending" />
+                  )}
+                  <span className={cn(isActive && 'font-semibold', isDone && 'text-slate-500')}>{it.step}</span>
+                </li>
+              )
+            })}
+          </ol>
+        </div>
+      )}
+    </div>
   )
 }

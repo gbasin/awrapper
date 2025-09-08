@@ -2,6 +2,9 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
 
+export type PlanItem = { step: string; status: 'pending' | 'in_progress' | 'completed' }
+export type PlanState = { items: PlanItem[]; explanation?: string; updatedAt?: number }
+
 export type AgentTrace = {
   runId: string
   status: 'running' | 'success' | 'error' | 'timeout'
@@ -14,6 +17,7 @@ export type AgentTrace = {
   tools: ToolCall[]
   errors: string[]
   approvals: ApprovalRequest[]
+  plan?: PlanState
 }
 
 export type ReasoningSection = {
@@ -146,6 +150,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         tools: [],
         errors: [],
         approvals: [],
+        plan: undefined,
         _toolMap: new Map(),
         _reasoningIdx: -1,
         _seq: 0,
@@ -276,6 +281,25 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         if (callId) {
           t.approvals.push({ callId, changes, justification })
         }
+        break
+      }
+      case 'update_plan':
+      case 'task_plan': {
+        try {
+          const arr = Array.isArray(e.msg?.plan) ? e.msg.plan : []
+          const validStatus = new Set(['pending', 'in_progress', 'completed'])
+          const items: PlanItem[] = []
+          for (const it of arr) {
+            const step = typeof it?.step === 'string' ? it.step : undefined
+            const status = typeof it?.status === 'string' && validStatus.has(it.status) ? (it.status as PlanItem['status']) : undefined
+            if (step && status) items.push({ step, status })
+          }
+          if (items.length > 0) {
+            const explanation = typeof e.msg?.explanation === 'string' ? e.msg.explanation : undefined
+            const updatedAt = ts(e.raw?.ts)
+            t.plan = { items, explanation, updatedAt }
+          }
+        } catch {}
         break
       }
       default:
