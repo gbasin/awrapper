@@ -4,7 +4,7 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 
 # Quickstart
 
-- Prereqs: Node.js 22.x (LTS). This repo has an `.nvmrc` pinned to 22.19.0 — run `nvm use` (or `nvm install`) to match. Also install Git and Codex CLI (`brew install codex` or `npm i -g @openai/codex`).
+- Prereqs: Node.js 23.x. This repo has an `.nvmrc` pinned to 23.4.0 — run `nvm use` (or `nvm install`) to match. Also install Git and Codex CLI (`brew install codex` or `npm i -g @openai/codex`).
 - Use pnpm: `pnpm install`
 - Run dev: `pnpm dev` or `DEBUG=1 pnpm dev` for extra logging
 - Typecheck: `pnpm typecheck` (server + web via Turbo)
