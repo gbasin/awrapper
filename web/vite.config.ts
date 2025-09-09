@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import checker from 'vite-plugin-checker'
 
 // Allow overriding the backend API origin/port for dev proxy.
 // Defaults to the server's default port (8787).
@@ -12,6 +13,7 @@ const API_ORIGIN =
 export default defineConfig({
   plugins: [
     react(),
+    checker({ typescript: true }),
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {

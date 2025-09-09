@@ -41,7 +41,7 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - `pnpm build`: runs server `build` then `turbo run build` for packages (web).
 - `pnpm test`: runs server tests then `turbo run test` (other packages with tests).
 
-Note: Vite doesn’t typecheck by default, so the web package exposes a `typecheck` script that runs in CI and before builds.
+Web builds include TypeScript checking via `vite-plugin-checker`, so Vite will fail on TS errors. The `typecheck` script also runs `tsc --noEmit` directly for CI and editor workflows.
 
 ## Environment
 
