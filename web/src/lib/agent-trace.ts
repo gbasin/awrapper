@@ -135,7 +135,7 @@ export function useAgentTraces(sessionId: string) {
 export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
   const byRun = new Map<string, AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number }>()
 
-  function ensure(runId: string): AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number } {
+  function ensure(runId: string): AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number } {
     let t = byRun.get(runId)
     if (!t) {
       t = {
@@ -311,7 +311,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
   // cleanup helpers
   const cleaned = new Map<string, AgentTrace>()
   for (const [k, v] of byRun.entries()) {
-    const { _toolMap: _1, _reasoningIdx: _2, ...rest } = v
+    const { _toolMap: _1, _reasoningIdx: _2, _seq: _3, ...rest } = v
     cleaned.set(k, rest)
   }
   return cleaned
@@ -330,9 +330,11 @@ function decodeMaybeBase64(x: any): string {
     if (!x) return ''
     if (typeof x === 'string') return x
     if (x?.type === 'base64' && typeof x?.data === 'string') {
-      if (typeof atob === 'function') return atob(x.data)
-      // Node fallback
-      return Buffer.from(x.data, 'base64').toString('utf8')
+      // Prefer browser global atob; if missing, return empty without Node-specific types.
+      const atobFn: ((s: string) => string) | undefined =
+        (typeof atob === 'function' ? atob : undefined) ||
+        (typeof globalThis !== 'undefined' && typeof (globalThis as any).atob === 'function' ? (globalThis as any).atob : undefined)
+      if (atobFn) return atobFn(x.data)
     }
   } catch {}
   return ''

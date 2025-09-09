@@ -36,7 +36,8 @@ export function Markdown({ className, children }: MarkdownProps) {
         ul: ({ node, ...props }) => <ul {...props} className="my-1 list-disc pl-5" />,
         ol: ({ node, ...props }) => <ol {...props} className="my-1 list-decimal pl-5" />,
         a: ({ node, ...props }) => <a {...props} className="underline underline-offset-2" target="_blank" rel="noreferrer" />,
-        code({ inline, className, children, ...props }) {
+        code(codeProps) {
+          const { inline, className, children, ...props } = codeProps as any
           const raw = String(children || '')
           const text = raw.replace(/\n+$/, '')
           const isOneLineFenced = !inline && !text.includes('\n')

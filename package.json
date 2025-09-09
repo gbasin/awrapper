@@ -11,9 +11,9 @@
     "dev": "tsx watch src/index.ts",
     "dev:info": "AWRAPPER_LOG_LEVEL=info tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc -p tsconfig.json && pnpm -C web build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage --pool=forks",
+    "build": "tsc -p tsconfig.json && turbo run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && turbo run typecheck",
+    "test": "vitest run --coverage --pool=forks && turbo run test",
     "test:watch": "vitest",
     "turbo": "turbo",
     "ci": "turbo run test"

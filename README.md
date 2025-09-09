@@ -7,8 +7,9 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - Prereqs: Node.js 22.x (LTS). This repo has an `.nvmrc` pinned to 22.19.0 — run `nvm use` (or `nvm install`) to match. Also install Git and Codex CLI (`brew install codex` or `npm i -g @openai/codex`).
 - Use pnpm: `pnpm install`
 - Run dev: `pnpm dev` or `DEBUG=1 pnpm dev` for extra logging
-- Build: `pnpm build`
-- Tests: `pnpm test`
+- Typecheck: `pnpm typecheck` (server + web via Turbo)
+- Build: `pnpm build` (server build + web build via Turbo)
+- Tests: `pnpm test` (runs package tests via Turbo; server uses Vitest)
 - Open: `http://127.0.0.1:8787` (append `?debug=1` for debug logging)
 
 # Notes
@@ -25,6 +26,22 @@ Local orchestrator for CLI agents (initial focus: Codex). v0.1 provides a single
 - Common issues:
   - No output, SyntaxError in browser: the session page script is ES5-compatible. If you still see a syntax error, hard-reload or try a different browser; share server logs (plus any `/client-log` lines).
   - `better-sqlite3` NODE_MODULE_VERSION mismatch: rebuild native modules after switching Node versions (see Troubleshooting above).
+
+## Monorepo layout
+
+- Package manager: pnpm workspaces (see `pnpm-workspace.yaml`).
+- Orchestration: Turborepo (`turbo.json`).
+- Packages:
+  - Root (server): Node/Fastify server. Scripts: `build` (tsc), `typecheck` (tsc --noEmit), `test` (Vitest).
+  - `web/` (UI): Vite + React. Scripts: `build` (vite build), `typecheck` (tsc --noEmit).
+
+### Commands
+
+- `pnpm typecheck`: runs `typecheck` in server and web via Turbo.
+- `pnpm build`: runs server `build` then `turbo run build` for packages (web).
+- `pnpm test`: runs server tests then `turbo run test` (other packages with tests).
+
+Note: Vite doesn’t typecheck by default, so the web package exposes a `typecheck` script that runs in CI and before builds.
 
 ## Environment
 
