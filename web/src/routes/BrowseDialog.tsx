@@ -40,8 +40,8 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
   }
 
   function Content() {
-    // Precompute crumbs/entries unconditionally to keep hooks ordering stable
-    const crumbs = useMemo(() => {
+    // Compute crumbs and entries directly; memoization not required here
+    const crumbs = (() => {
       if (!data || 'roots' in data) return [] as Array<{ label: string; path: string }>
       const parts = data.path.split('/').filter(Boolean)
       const acc: Array<{ label: string; path: string }> = []
@@ -51,12 +51,12 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
         acc.push({ label: parts[i], path: current })
       }
       return acc
-    }, [data && !('roots' in (data as any)) ? (data as ListResp).path : undefined])
-    const entries = useMemo(() => {
+    })()
+    const entries = (() => {
       if (!data || 'roots' in data) return [] as ListResp['entries']
       const list = onlyGit ? (data as ListResp).entries.filter((e) => e.is_repo) : (data as ListResp).entries
       return list.slice().sort((a, b) => a.name.localeCompare(b.name))
-    }, [data, onlyGit])
+    })()
 
     if (!data) return <div className="text-sm text-slate-500">Loading…</div>
     if ('roots' in data) {

@@ -63,13 +63,13 @@ export default function Session() {
     if (!logsOpen) return
     const viewport = viewportRef.current
     if (viewport) viewport.scrollTop = viewport.scrollHeight
-  }, [logsOpen])
+  }, [logsOpen, viewportRef])
 
   useEffect(() => {
     if (!logsOpen || !followTail) return
     const viewport = viewportRef.current
     if (viewport) viewport.scrollTop = viewport.scrollHeight
-  }, [log.data, followTail, logsOpen])
+  }, [log.data, followTail, logsOpen, viewportRef])
 
   // Track whether viewport is at bottom; disable follow when user scrolls up
   useEffect(() => {
@@ -86,7 +86,7 @@ export default function Session() {
     onScroll()
     viewport.addEventListener('scroll', onScroll)
     return () => viewport.removeEventListener('scroll', onScroll)
-  }, [logsOpen, followTail])
+  }, [logsOpen, followTail, viewportRef])
 
   useEffect(() => {
     try { localStorage.setItem('awrapper:logsWrap', wrap ? '1' : '0') } catch {}
@@ -397,7 +397,7 @@ function BackfillLogViewer({ text, wrap, follow, viewportRef }: { text: string; 
         })
       }
     }
-  }, [text, follow])
+  }, [text, follow, viewportRef])
 
   return (
     <pre className={cn('mono text-xs', wrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')}>
@@ -441,7 +441,7 @@ function PlanPinned({ plan, active, sessionId }: { plan: PlanState; active: bool
   const debug = (() => { try { return /[?&]debug=1/.test(location.search) } catch { return false } })()
   useEffect(() => {
     if (debug) console.log('[plan-ui] plan updated', { active, counts, updatedAt: plan.updatedAt })
-  }, [debug, plan?.updatedAt, active])
+  }, [debug, plan?.updatedAt, active, counts])
   useEffect(() => {
     try { localStorage.setItem(`awrapper:planCollapsed:${sessionId}`, open ? '0' : '1') } catch {}
   }, [open, sessionId])

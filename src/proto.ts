@@ -196,9 +196,7 @@ export class CodexProtoSession {
         if (timer) clearTimeout(timer);
         fn(v);
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (resolve as any) = wrap(resolve);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (reject as any) = wrap(reject);
     });
   }
