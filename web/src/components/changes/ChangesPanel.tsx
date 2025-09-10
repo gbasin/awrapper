@@ -119,6 +119,7 @@ export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?
                 staged={changesQ.data?.staged || []}
                 unstaged={changesQ.data?.unstaged || []}
                 commitEnabled={!!cfgQ.data?.enable_commit}
+                promoteEnabled={!!cfgQ.data?.enable_promote}
               />
             )}
           </div>
@@ -128,12 +129,17 @@ export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?
   )
 }
 
-function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged, commitEnabled }: { sessionId: string; tab: 'unstaged' | 'staged'; onTabChange: (t: 'unstaged' | 'staged') => void; staged: Array<{ path: string; status: string; renamed_from?: string }>; unstaged: Array<{ path: string; status: string; renamed_from?: string }>; commitEnabled: boolean }) {
+function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged, commitEnabled, promoteEnabled }: { sessionId: string; tab: 'unstaged' | 'staged'; onTabChange: (t: 'unstaged' | 'staged') => void; staged: Array<{ path: string; status: string; renamed_from?: string }>; unstaged: Array<{ path: string; status: string; renamed_from?: string }>; commitEnabled: boolean; promoteEnabled: boolean }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const curr = tab === 'staged' ? staged : unstaged
   const [commitOpen, setCommitOpen] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
   const [committing, setCommitting] = useState(false)
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [preflight, setPreflight] = useState<any | null>(null)
+  const [preflightLoading, setPreflightLoading] = useState(false)
+  const [promoteMsg, setPromoteMsg] = useState('')
+  const [promoteBranch, setPromoteBranch] = useState('')
   const qc = useQueryClient()
   return (
     <div>
@@ -145,6 +151,31 @@ function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged, commitE
         <div className="inline-flex items-center gap-2">
           <Button size="sm" variant="default" disabled={!commitEnabled || staged.length === 0} onClick={() => setCommitOpen(true)} title={!commitEnabled ? 'Commit disabled' : (staged.length === 0 ? 'No staged changes' : 'Commit staged changes')}>
             Commit…
+          </Button>
+          <Button
+            size="sm"
+            variant="default"
+            disabled={!promoteEnabled}
+            onClick={async () => {
+              setPromoteOpen(true)
+              setPreflight(null)
+              setPreflightLoading(true)
+              try {
+                const pf = await api.getPromotePreflight(sessionId)
+                setPreflight(pf)
+                const suggest = pf?.onDefaultBranch || !pf?.currentBranch
+                  ? `awrapper/${sessionId.slice(0, 8)}`
+                  : (pf?.currentBranch || '')
+                setPromoteBranch(suggest)
+              } catch (e: any) {
+                setPreflight({ error: e?.message || String(e) })
+              } finally {
+                setPreflightLoading(false)
+              }
+            }}
+            title={!promoteEnabled ? 'Promote disabled' : 'Commit, push, and open a PR'}
+          >
+            Promote…
           </Button>
         </div>
       </div>
@@ -190,6 +221,70 @@ function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged, commitE
                 setCommitting(false)
               }
             }}>{committing ? 'Committing…' : 'Commit'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={promoteOpen} onOpenChange={setPromoteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Promote to repo</DialogTitle>
+            <DialogDescription>
+              Commit all changes, push a branch, and create a PR to the default branch.
+            </DialogDescription>
+          </DialogHeader>
+          {preflightLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : preflight && preflight.error ? (
+            <div className="text-xs text-red-600">{String(preflight.error)}</div>
+          ) : preflight ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <div className="text-slate-500">Remote</div>
+                <div className="text-slate-800">{preflight.remote || '—'}</div>
+                <div className="text-slate-500">Default branch</div>
+                <div className="text-slate-800">{preflight.defaultBranch || '—'}</div>
+                <div className="text-slate-500">Current branch</div>
+                <div className="text-slate-800">{preflight.currentBranch || '—'}</div>
+                <div className="text-slate-500">Ahead/behind</div>
+                <div className="text-slate-800">{(preflight.ahead ?? 0)}/{(preflight.behind ?? 0)}</div>
+                <div className="text-slate-500">gh CLI</div>
+                <div className="text-slate-800">{preflight.ghAvailable ? 'available' : 'not found'}</div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-600">Commit message</label>
+                <Textarea rows={4} placeholder="e.g. feat: add changes review UI" value={promoteMsg} onChange={(e) => setPromoteMsg(e.currentTarget.value)} />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-600">Branch</label>
+                <input className="w-full rounded border px-2 py-1 text-sm" value={promoteBranch} onChange={(e) => setPromoteBranch(e.currentTarget.value)} />
+              </div>
+              <div className="text-[11px] text-slate-600">No changes are written until you confirm.</div>
+            </div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPromoteOpen(false)}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                const msg = String(promoteMsg || '').trim()
+                if (!msg) { toast.error('Enter a commit message'); return }
+                try {
+                  const branch = String(promoteBranch || '').trim()
+                  const res = await api.postPromote(sessionId, { message: msg, branch: branch || undefined })
+                  toast.success(`Pushed ${res.branch}`)
+                  setPromoteOpen(false)
+                  await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
+                  if (res.prUrl) {
+                    window.open(res.prUrl, '_blank')
+                  } else if (res.compareUrl) {
+                    window.open(res.compareUrl, '_blank')
+                  }
+                } catch (e: any) {
+                  toast.error(`Promote failed: ${e?.message || e}`)
+                }
+              }}
+            >
+              Promote
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

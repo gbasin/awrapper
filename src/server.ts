@@ -14,6 +14,7 @@ import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
 import { execa } from 'execa';
+import { buildGithubCompareUrl } from './github.js';
 
 export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({
@@ -95,8 +96,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // Directory browsing API for server-side picker
   // Also surface minimal runtime config for the SPA
   app.get('/config', async (_req, reply) => {
-    const { ENABLE_GIT_COMMIT } = await import('./config.js');
-    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE, enable_commit: ENABLE_GIT_COMMIT });
+    const { ENABLE_GIT_COMMIT, ENABLE_PROMOTE } = await import('./config.js');
+    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE, enable_commit: ENABLE_GIT_COMMIT, enable_promote: ENABLE_PROMOTE });
   });
 
   // Directory browsing API for server-side picker
@@ -740,6 +741,204 @@ export async function buildServer(opts?: { listen?: boolean }) {
     } catch (e: any) {
       return reply.code(500).send({ error: 'git op failed', message: String(e?.shortMessage || e?.message || e || '') });
     }
+  });
+
+  // --- Promote (Push + PR) API (Phase 4; feature-flagged) ---
+  // Preflight details for promote: remote/default branch, gh availability, ahead/behind
+  app.get('/sessions/:id/promote/preflight', async (req, reply) => {
+    const { id } = req.params as any;
+    const { ENABLE_PROMOTE } = await import('./config.js');
+    if (!ENABLE_PROMOTE) return reply.code(404).send({ error: 'promote disabled' });
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+
+    const res: any = { enable_promote: true };
+    // Git availability
+    try { await execa('git', ['-C', wt, 'rev-parse', '--git-dir']); res.gitAvailable = true; } catch { res.gitAvailable = false; }
+    if (!res.gitAvailable) { reply.header('Cache-Control', 'no-store'); return reply.send(res); }
+
+    // gh availability
+    try { const { stdout } = await execa('gh', ['--version']); res.ghAvailable = !!(stdout || '').trim(); } catch { res.ghAvailable = false; }
+
+    // Remote and URL
+    let remote = '';
+    let remoteUrl = '';
+    try {
+      const { stdout } = await execa('git', ['-C', wt, 'remote']);
+      const remotes = (stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      remote = remotes.includes('origin') ? 'origin' : (remotes[0] || '');
+    } catch {}
+    res.remote = remote || null;
+    if (remote) {
+      try { const { stdout } = await execa('git', ['-C', wt, 'remote', 'get-url', remote]); remoteUrl = (stdout || '').trim(); } catch {}
+    }
+    res.remoteUrl = remoteUrl || null;
+
+    // Current branch
+    let currentBranch = '';
+    try { const { stdout } = await execa('git', ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']); currentBranch = (stdout || '').trim(); } catch {}
+    res.currentBranch = currentBranch || null;
+
+    // Default branch detection (origin/HEAD or remote show)
+    let defaultBranch = '';
+    if (remote) {
+      try {
+        const { stdout } = await execa('git', ['-C', wt, 'symbolic-ref', '-q', `refs/remotes/${remote}/HEAD`]);
+        const ref = (stdout || '').trim();
+        if (ref) defaultBranch = ref.split('/').pop() || '';
+      } catch {}
+      if (!defaultBranch) {
+        try {
+          const { stdout } = await execa('git', ['-C', wt, 'remote', 'show', remote]);
+          const m = /HEAD branch:\s*(\S+)/.exec(stdout || '');
+          if (m && m[1]) defaultBranch = m[1].trim();
+        } catch {}
+      }
+    }
+    res.defaultBranch = defaultBranch || null;
+    res.onDefaultBranch = !!(currentBranch && defaultBranch && currentBranch === defaultBranch);
+
+    // Ahead/behind if tracking branch exists
+    let ahead = 0, behind = 0;
+    if (remote && currentBranch) {
+      try {
+        const { stdout } = await execa('git', ['-C', wt, 'rev-list', '--left-right', '--count', `${remote}/${currentBranch}...HEAD`]);
+        const parts = (stdout || '').trim().split(/\s+/);
+        if (parts.length >= 2) { behind = Number(parts[0] || 0) || 0; ahead = Number(parts[1] || 0) || 0; }
+      } catch {
+        // leave zero if tracking branch missing
+      }
+    }
+    res.ahead = ahead; res.behind = behind;
+
+    // Uncommitted summary
+    let stagedCount = 0, unstagedCount = 0;
+    try {
+      const { stdout } = await execa('git', ['-C', wt, 'status', '--porcelain=v2', '-z']);
+      const parts = (stdout as any as string).split('\u0000');
+      for (let i = 0; i < parts.length; i++) {
+        const rec = parts[i]; if (!rec) continue;
+        const tag = rec[0];
+        if (tag === '1') {
+          const m = /^1\s+([^\s]+)/.exec(rec); const XY = m?.[1] || '';
+          if (XY[0] && XY[0] !== '.') stagedCount++;
+          if (XY[1] && XY[1] !== '.') unstagedCount++;
+        } else if (tag === '2') {
+          const m = /^2\s+([^\s]+)/.exec(rec); const XY = m?.[1] || '';
+          if (XY[0] && XY[0] !== '.') stagedCount++;
+          if (XY[1] && XY[1] !== '.') unstagedCount++;
+          i += 1; // skip orig path token
+        } else if (tag === '?') {
+          unstagedCount++;
+        }
+        if (stagedCount + unstagedCount > 1000) break;
+      }
+    } catch {}
+    res.stagedCount = stagedCount; res.unstagedCount = unstagedCount; res.uncommitted = (stagedCount + unstagedCount) > 0;
+
+    reply.header('Cache-Control', 'no-store');
+    reply.send(res);
+  });
+
+  // Perform promote: commit (stage all), branch (if needed), push, and create PR
+  app.post('/sessions/:id/promote', async (req, reply) => {
+    const { id } = req.params as any;
+    const { ENABLE_PROMOTE } = await import('./config.js');
+    if (!ENABLE_PROMOTE) return reply.code(404).send({ error: 'promote disabled' });
+    let body: any = (req.body as any) || {};
+    if (Buffer.isBuffer(body)) { try { body = JSON.parse(body.toString('utf8')); } catch { body = {}; } }
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const desiredBranch = typeof body.branch === 'string' ? body.branch.trim() : '';
+    if (!message) return reply.code(400).send({ error: 'commit message required' });
+
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+
+    try { await execa('git', ['-C', wt, 'rev-parse', '--git-dir']); } catch { return reply.code(404).send({ error: 'git not available' }); }
+
+    // Remote and default branch
+    let remote = '';
+    try { const { stdout } = await execa('git', ['-C', wt, 'remote']); const rems = (stdout || '').split(/\r?\n/).map(s=>s.trim()).filter(Boolean); remote = rems.includes('origin') ? 'origin' : (rems[0] || ''); } catch {}
+    if (!remote) return reply.code(400).send({ error: 'no git remote found' });
+    let defaultBranch = '';
+    try { const { stdout } = await execa('git', ['-C', wt, 'symbolic-ref', '-q', `refs/remotes/${remote}/HEAD`]); const ref = (stdout || '').trim(); if (ref) defaultBranch = ref.split('/').pop() || ''; } catch {}
+    if (!defaultBranch) {
+      try { const { stdout } = await execa('git', ['-C', wt, 'remote', 'show', remote]); const m = /HEAD branch:\s*(\S+)/.exec(stdout || ''); if (m && m[1]) defaultBranch = m[1].trim(); } catch {}
+    }
+    if (!defaultBranch) defaultBranch = 'main';
+
+    // Current branch
+    let currentBranch = '';
+    try { const { stdout } = await execa('git', ['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD']); currentBranch = (stdout || '').trim(); } catch {}
+
+    // If branch specified, switch/create it first
+    let branch = desiredBranch || '';
+    if (branch) {
+      try { await execa('git', ['-C', wt, 'checkout', '-B', branch]); } catch (e: any) {
+        return reply.code(500).send({ error: 'failed to checkout branch', message: String(e?.shortMessage || e?.message || e || '') });
+      }
+    } else {
+      // If on default branch or detached, create a new branch based on session id
+      if (!currentBranch || currentBranch === 'HEAD' || currentBranch === defaultBranch) {
+        const short = String(id || '').slice(0, 8) || Math.random().toString(36).slice(2, 8);
+        branch = `awrapper/${short}`;
+        try { await execa('git', ['-C', wt, 'checkout', '-B', branch]); } catch (e: any) {
+          return reply.code(500).send({ error: 'failed to create branch', message: String(e?.shortMessage || e?.message || e || '') });
+        }
+      } else {
+        branch = currentBranch;
+      }
+    }
+
+    // Stage all and commit if there are changes
+    try { await execa('git', ['-C', wt, 'add', '-A']); } catch {}
+    try {
+      // Only commit if there are staged changes
+      const { stdout } = await execa('git', ['-C', wt, 'diff', '--cached', '--name-only']);
+      if ((stdout || '').trim().length > 0) {
+        await execa('git', ['-C', wt, 'commit', '-m', message]);
+      }
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'git commit failed', message: String(e?.shortMessage || e?.message || e || '') });
+    }
+
+    // Push branch
+    try {
+      await execa('git', ['-C', wt, 'push', '-u', remote, branch]);
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'git push failed', message: String(e?.shortMessage || e?.message || e || '') });
+    }
+
+    // Try to create PR via gh; if not available, prepare compare URL
+    let prUrl = '';
+    let compareUrl = '';
+    // Resolve remote URL for fallback
+    let remoteUrl = '';
+    try { const { stdout } = await execa('git', ['-C', wt, 'remote', 'get-url', remote]); remoteUrl = (stdout || '').trim(); } catch {}
+    try {
+      const ghOk = await execa('gh', ['--version']).then(() => true).catch(() => false);
+      if (ghOk) {
+        // Use gh to create PR with a minimal body
+        const title = message.split('\n')[0] || `Session ${id} changes`;
+        const body = `Created by awrapper session ${id}.`;
+        const { stdout } = await execa('gh', ['pr', 'create', '--fill', '--base', defaultBranch, '--head', branch, '--title', title, '--body', body], { cwd: wt });
+        const out = (stdout || '').trim();
+        const lines = out.split(/\r?\n/).filter(Boolean);
+        prUrl = lines[lines.length - 1] || '';
+      }
+    } catch (e: any) {
+      // Fall through to compare URL
+      prUrl = '';
+    }
+    if (!prUrl && remoteUrl) {
+      compareUrl = buildGithubCompareUrl(remoteUrl, defaultBranch, branch) || '';
+    }
+
+    reply.send({ ok: true, branch, pushed: true, prUrl: prUrl || undefined, compareUrl: compareUrl || undefined });
   });
 
   // Update session options (currently supports block_while_running)

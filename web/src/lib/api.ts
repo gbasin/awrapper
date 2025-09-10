@@ -29,7 +29,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
-  getConfig: () => json<{ default_use_worktree: boolean; enable_commit?: boolean }>('/config'),
+  getConfig: () => json<{ default_use_worktree: boolean; enable_commit?: boolean; enable_promote?: boolean }>('/config'),
   createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean; block_while_running?: boolean }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
@@ -73,4 +73,9 @@ export const api = {
       | { op: 'discardIndex'; paths: string[] }
       | { op: 'commit'; message: string }
   ) => json<{ ok: true }>(`/sessions/${id}/git`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  // Promote API (Phase 4)
+  getPromotePreflight: (id: string) =>
+    json<{ enable_promote?: boolean; gitAvailable?: boolean; ghAvailable?: boolean; remote?: string | null; remoteUrl?: string | null; defaultBranch?: string | null; currentBranch?: string | null; onDefaultBranch?: boolean; ahead?: number; behind?: number; stagedCount?: number; unstagedCount?: number; uncommitted?: boolean }>(`/sessions/${id}/promote/preflight`),
+  postPromote: (id: string, body: { message: string; branch?: string }) =>
+    json<{ ok: true; branch: string; pushed: boolean; prUrl?: string; compareUrl?: string }>(`/sessions/${id}/promote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }

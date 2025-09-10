@@ -26,6 +26,11 @@ export const PROTO_TRY_CONFIGURE = process.env.AWRAPPER_PROTO_CONFIGURE === '1';
 export const ENABLE_GIT_COMMIT =
   process.env.AWRAPPER_ENABLE_COMMIT === '1' || process.env.AWRAPPER_GIT_COMMIT === '1';
 
+// Feature flag: enable Promote (push + PR) flow in Changes panel
+// When enabled, server exposes preflight and promote endpoints and UI shows Promote dialog.
+export const ENABLE_PROMOTE =
+  process.env.AWRAPPER_ENABLE_PROMOTE === '1' || process.env.AWRAPPER_GIT_PROMOTE === '1' || false;
+
 // Default behavior for using Git worktrees when creating sessions.
 // Set AWRAPPER_USE_WORKTREE=0 or =false to disable by default.
 const RAW_USE_WT = process.env.AWRAPPER_USE_WORKTREE ?? '1';
