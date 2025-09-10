@@ -29,7 +29,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
-  getConfig: () => json<{ default_use_worktree: boolean }>('/config'),
+  getConfig: () => json<{ default_use_worktree: boolean; enable_commit?: boolean }>('/config'),
   createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean; block_while_running?: boolean }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
@@ -71,5 +71,6 @@ export const api = {
       | { op: 'unstage'; paths: string[] }
       | { op: 'discardWorktree'; paths: string[] }
       | { op: 'discardIndex'; paths: string[] }
+      | { op: 'commit'; message: string }
   ) => json<{ ok: true }>(`/sessions/${id}/git`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }

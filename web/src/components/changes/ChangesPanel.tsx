@@ -21,12 +21,14 @@ import {
   AlertDialogTrigger,
 } from '../ui/alert-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog'
+import { Textarea } from '../ui/textarea'
 
 export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?: Map<string, AgentTrace> }) {
   const [open, setOpen] = useState<boolean>(true)
   const [tab, setTab] = useState<'unstaged' | 'staged'>('unstaged')
   const [onlyNew, setOnlyNew] = useState<boolean>(false)
   const changesQ = useQuery({ queryKey: ['changes', sessionId], queryFn: () => api.getChanges(sessionId), refetchInterval: 2500 })
+  const cfgQ = useQuery({ queryKey: ['config'], queryFn: () => api.getConfig() })
 
   // Proposed approvals aggregated from all traces
   const proposed = useMemo(() => {
@@ -116,6 +118,7 @@ export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?
                 onTabChange={setTab}
                 staged={changesQ.data?.staged || []}
                 unstaged={changesQ.data?.unstaged || []}
+                commitEnabled={!!cfgQ.data?.enable_commit}
               />
             )}
           </div>
@@ -125,14 +128,25 @@ export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?
   )
 }
 
-function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged }: { sessionId: string; tab: 'unstaged' | 'staged'; onTabChange: (t: 'unstaged' | 'staged') => void; staged: Array<{ path: string; status: string; renamed_from?: string }>; unstaged: Array<{ path: string; status: string; renamed_from?: string }> }) {
+function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged, commitEnabled }: { sessionId: string; tab: 'unstaged' | 'staged'; onTabChange: (t: 'unstaged' | 'staged') => void; staged: Array<{ path: string; status: string; renamed_from?: string }>; unstaged: Array<{ path: string; status: string; renamed_from?: string }>; commitEnabled: boolean }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const curr = tab === 'staged' ? staged : unstaged
+  const [commitOpen, setCommitOpen] = useState(false)
+  const [commitMsg, setCommitMsg] = useState('')
+  const [committing, setCommitting] = useState(false)
+  const qc = useQueryClient()
   return (
     <div>
-      <div className="mb-2 inline-flex items-center gap-1 rounded border p-0.5 bg-slate-50">
-        <Button size="sm" variant={tab === 'unstaged' ? 'secondary' : 'ghost'} onClick={() => onTabChange('unstaged')}>Unstaged ({unstaged.length})</Button>
-        <Button size="sm" variant={tab === 'staged' ? 'secondary' : 'ghost'} onClick={() => onTabChange('staged')}>Staged ({staged.length})</Button>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="inline-flex items-center gap-1 rounded border p-0.5 bg-slate-50">
+          <Button size="sm" variant={tab === 'unstaged' ? 'secondary' : 'ghost'} onClick={() => onTabChange('unstaged')}>Unstaged ({unstaged.length})</Button>
+          <Button size="sm" variant={tab === 'staged' ? 'secondary' : 'ghost'} onClick={() => onTabChange('staged')}>Staged ({staged.length})</Button>
+        </div>
+        <div className="inline-flex items-center gap-2">
+          <Button size="sm" variant="default" disabled={!commitEnabled || staged.length === 0} onClick={() => setCommitOpen(true)} title={!commitEnabled ? 'Commit disabled' : (staged.length === 0 ? 'No staged changes' : 'Commit staged changes')}>
+            Commit…
+          </Button>
+        </div>
       </div>
       {curr.length === 0 ? (
         <div className="text-xs text-slate-500">No changes</div>
@@ -143,6 +157,42 @@ function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged }: { ses
           ))}
         </div>
       )}
+      <Dialog open={commitOpen} onOpenChange={setCommitOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Commit staged changes</DialogTitle>
+            <DialogDescription>Only staged files will be included. Unstaged changes are left as-is.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label className="block text-xs text-slate-600">Message</label>
+            <Textarea rows={5} placeholder="e.g. feat: add changes review UI" value={commitMsg} onChange={(e) => setCommitMsg(e.currentTarget.value)} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => setCommitMsg((v) => v || 'feat: ')} variant="secondary">Suggest: feat</Button>
+              <Button size="sm" onClick={() => setCommitMsg((v) => v || 'fix: ')} variant="secondary">Suggest: fix</Button>
+              <Button size="sm" onClick={() => setCommitMsg((v) => v || 'chore: ')} variant="secondary">Suggest: chore</Button>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCommitOpen(false)}>Cancel</Button>
+            <Button disabled={committing} onClick={async () => {
+              const msg = commitMsg.trim()
+              if (!msg) { toast.error('Enter a commit message'); return }
+              try {
+                setCommitting(true)
+                await api.postGit(sessionId, { op: 'commit', message: msg })
+                toast.success('Committed staged changes')
+                setCommitOpen(false)
+                setCommitMsg('')
+                await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
+              } catch (e: any) {
+                toast.error(`Commit failed: ${e?.message || e}`)
+              } finally {
+                setCommitting(false)
+              }
+            }}>{committing ? 'Committing…' : 'Commit'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

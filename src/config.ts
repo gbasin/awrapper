@@ -22,6 +22,9 @@ export const LOG_LEVEL = (process.env.AWRAPPER_LOG_LEVEL || 'info') as
   | 'trace';
 export const HTTP_LOG = process.env.AWRAPPER_HTTP_LOG === '1';
 export const PROTO_TRY_CONFIGURE = process.env.AWRAPPER_PROTO_CONFIGURE === '1';
+// Feature flag: enable commit API/UI in Changes panel
+export const ENABLE_GIT_COMMIT =
+  process.env.AWRAPPER_ENABLE_COMMIT === '1' || process.env.AWRAPPER_GIT_COMMIT === '1';
 
 // Default behavior for using Git worktrees when creating sessions.
 // Set AWRAPPER_USE_WORKTREE=0 or =false to disable by default.

@@ -95,7 +95,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // Directory browsing API for server-side picker
   // Also surface minimal runtime config for the SPA
   app.get('/config', async (_req, reply) => {
-    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE });
+    const { ENABLE_GIT_COMMIT } = await import('./config.js');
+    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE, enable_commit: ENABLE_GIT_COMMIT });
   });
 
   // Directory browsing API for server-side picker
@@ -680,7 +681,24 @@ export async function buildServer(opts?: { listen?: boolean }) {
 
     // Commit is feature-flagged (disabled by default)
     if (op === 'commit') {
-      return reply.code(404).send({ error: 'commit disabled' });
+      const { ENABLE_GIT_COMMIT } = await import('./config.js');
+      if (!ENABLE_GIT_COMMIT) {
+        return reply.code(404).send({ error: 'commit disabled' });
+      }
+      // Validate message
+      const msg = typeof body.message === 'string' ? body.message.trim() : '';
+      if (!msg) return reply.code(400).send({ error: 'commit message required' });
+      try {
+        // Ensure there are staged changes
+        const { stdout } = await execa('git', ['-C', wt, 'diff', '--cached', '--name-only']);
+        const hasStaged = (stdout || '').trim().length > 0;
+        if (!hasStaged) return reply.code(400).send({ error: 'nothing to commit' });
+        // Commit staged changes only (do not include untracked/unstaged)
+        await execa('git', ['-C', wt, 'commit', '-m', msg]);
+        return reply.send({ ok: true });
+      } catch (e: any) {
+        return reply.code(500).send({ error: 'git commit failed', message: String(e?.shortMessage || e?.message || e || '') });
+      }
     }
 
     // Validate and guard paths
