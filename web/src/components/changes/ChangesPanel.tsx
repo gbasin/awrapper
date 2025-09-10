@@ -339,15 +339,9 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
       // Refresh changes and diff after op
       await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
       // Reload diff for current side
-      if (viewSide === 'head') {
-        const f = await api.getFile(sessionId, entry.path, 'head')
-        setIsBinary(false)
-        setDiff(f.content || '')
-      } else {
-        const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
-        setIsBinary(!!j.isBinary)
-        setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
-      }
+      const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
+      setIsBinary(!!j.isBinary)
+      setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
     } catch {
       // noop; could surface toast
     } finally {
@@ -416,15 +410,10 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
                   path={entry.path}
                   onSaved={async (staged) => {
                     await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
-                    if (viewSide === 'head') {
-                      const f = await api.getFile(sessionId, entry.path, 'head')
-                      setIsBinary(false)
-                      setDiff(f.content || '')
-                    } else {
-                      const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
-                      setIsBinary(!!j.isBinary)
-                      setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
-                    }
+                    // In merge view, head is disabled; reload current side diff
+                    const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
+                    setIsBinary(!!j.isBinary)
+                    setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
                     if (staged) {
                       try { await api.postGit(sessionId, { op: 'stage', paths: [entry.path] }) } catch {}
                       await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
