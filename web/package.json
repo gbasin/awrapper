@@ -13,6 +13,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/merge": "^6.2.2",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.27.0",
     "@radix-ui/react-alert-dialog": "^1.1.2",
     "@radix-ui/react-dialog": "^1.1.1",
     "@radix-ui/react-popover": "^1.1.2",

@@ -7,7 +7,7 @@ import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
 import { Skeleton } from '../ui/skeleton'
 import { cn } from '../../lib/utils'
-import { MergeHunks } from './MergeHunks'
+import { MergeCM } from './MergeCM'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -235,16 +235,14 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
               {isBinary ? (
                 <div className="text-xs text-slate-600">Binary file — merge disabled</div>
               ) : (
-                <MergeHunks
+                <MergeCM
                   sessionId={sessionId}
                   path={entry.path}
                   onSaved={async (staged) => {
-                    // Refresh list + diff after save
                     await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
                     const j = await api.getDiff(sessionId, entry.path, side, 3)
                     setIsBinary(!!j.isBinary)
                     setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
-                    // Optionally stage after save
                     if (staged) {
                       try { await api.postGit(sessionId, { op: 'stage', paths: [entry.path] }) } catch {}
                       await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
