@@ -42,34 +42,40 @@ Add minimal endpoints under `/sessions/:id/*` that operate only within the workt
 
 - `GET /changes`
   - Returns a snapshot of uncommitted changes with staged/unstaged breakdown.
-  - Implementation: parse `git status --porcelain=v1 -z` and map entries.
+  - Implementation: parse `git status --porcelain=v2 -z` and map entries (better rename/copy detection and robust quoting).
   - Response (example):
     ```json
     {
       "head": "<commit>",
       "staged": [ { "path": "src/a.ts", "status": "M" } ],
-      "unstaged": [ { "path": "src/b.ts", "status": "M" } ]
+      "unstaged": [ { "path": "src/b.ts", "status": "R", "renamed_from": "src/old-b.ts" } ]
     }
     ```
 
-- `GET /diff?path=...` (or `?all=1` to stream the whole repo diff sparingly)
-  - Returns unified diff vs `HEAD` for a file (unstaged if present; else staged).
-  - Implementation: `git diff -- unified` or `git diff --cached` as needed.
+- `GET /diff?path=...&side=worktree|index|head&context=3` (optional `?paths=...` for batching)
+  - Returns unified diff vs `HEAD` for the requested side. Default `side=worktree`.
+  - Implementation: `git diff --unified=<context> -- <path>` for worktree vs HEAD; `git diff --cached --unified=<context> -- <path>` for index vs HEAD. Serve metadata for binary files instead of text hunks.
 
-- `GET /file?path=...&rev=HEAD|worktree`
-  - Returns file content from `HEAD` (via `git show`) or the worktree (via fs).
+- `GET /file?path=...&rev=head|index|worktree`
+  - Returns file content from `HEAD` (via `git show`), the index (via `git show :path`), or the worktree (via fs).
+  - Include an `etag` (content hash) in the response for optimistic concurrency.
 
 - `PUT /file`
-  - Body: `{ path, content, stage?: boolean, expected_base_oid?: string, expected_mtime?: number }`
-  - Writes new content to the worktree; optionally stages file. Reject on mismatch to avoid clobbering concurrent edits.
+  - Body: `{ path, content, stage?: boolean, expected_etag?: string, expected_head_oid?: string, expected_index_oid?: string }`
+  - Writes new content to the worktree; optionally stages file. Reject when `expected_*` do not match to avoid clobbering concurrent edits.
 
 - `POST /git`
-  - Body: `{ op: 'stage'|'unstage'|'discard'|'commit', paths?: string[], message?: string }`
-  - `discard` resets paths to `HEAD` (`git checkout -- <paths>`); `commit` creates a commit in the worktree if desired (optional, might remain disabled initially).
+  - Body: one of
+    - `{ op: 'stage', paths: string[] }`
+    - `{ op: 'unstage', paths: string[] }`
+    - `{ op: 'discardWorktree', paths: string[] }` (uses `git restore --worktree`)
+    - `{ op: 'discardIndex', paths: string[] }` (uses `git restore --staged`)
+    - `{ op: 'commit', message: string }` (feature-flagged; disabled by default)
 
 Security/validation:
-- Validate paths are under the session worktree.
-- Rate‑limit and bound diff sizes.
+- Validate paths are under the session worktree using `realpath` prefix checks.
+- By default, block following or writing through symlinks.
+- Rate‑limit and bound diff sizes, file sizes, and request durations.
 
 ## UI / Interaction Design
 
@@ -83,8 +89,9 @@ Pinned “Changes” panel in the Session page (similar to the Plan panel). Two 
 - Applied (uncommitted):
   - Tabs: Unstaged | Staged.
   - List changed files; expanding a file loads a merge/diff view (see Library) with accept/reject hunk controls and an editor for manual tweaks.
-  - Actions per file: Save (PUT `/file`), Stage/Unstage (POST `/git`), Discard (POST `/git` op=discard). Bulk actions for selected files.
-  - Auto‑refresh while a turn is running; manual refresh button otherwise.
+  - Side toggle: Worktree | Index | HEAD for clarity and predictability.
+  - Actions per file: Save (PUT `/file`), Stage/Unstage (POST `/git`), Discard (POST `/git` with `discardWorktree`/`discardIndex`). Bulk actions for selected files.
+  - Auto‑refresh while a turn is running; manual refresh button otherwise. Add filter: “Only new since this turn”.
 
 Per‑turn context:
 - When `task_started` appears, snapshot the current file list in the client; annotate newly changed files as “since this turn”. This requires no extra server state.
@@ -109,7 +116,8 @@ Decision: Start with CodeMirror Merge for hunk‑level control + manual edits.
 
 - Baseline: current `HEAD` of the session worktree. Users typically won’t commit in the session; if they do, diffs remain relative to the new `HEAD` (acceptable for v1). Optional: display initial HEAD in the panel header.
 - Scope: operate only on uncommitted changes. We’re not rewriting history.
-- Performance: for large diffs, virtualize lists and stream per‑file diffs on demand.
+- Explicit sides: when showing diffs, prefer an explicit side (worktree/index/head) rather than auto-picking unstaged vs staged.
+- Performance: for large diffs, virtualize lists and stream per‑file diffs on demand; cap payload sizes.
 
 ## Approvals Interplay
 
@@ -120,24 +128,32 @@ Decision: Start with CodeMirror Merge for hunk‑level control + manual edits.
 ## Edge Cases
 
 - Non‑Git directories: Applied pane hidden; Proposed still works.
-- Binary files: show metadata (size/hash) and offer Replace/Discard; skip merge UI.
+- Binary files: show metadata (size/hash) and offer Replace/Discard; skip merge UI. Surface `isBinary`, `size`, and `sha` in `/diff`.
 - Renames: surface from porcelain status; show `renamed_from` in UI.
-- Conflicts: if PUT `/file` detects `expected_base_oid`/mtime mismatch, prompt user to refresh and reapply decisions.
+- Conflicts: if PUT `/file` detects `expected_*` mismatch, prompt user to refresh and reapply decisions.
+- Symlinks: do not write through symlinks by default; show a warning banner if encountered.
 
 ## Implementation Plan (Phased)
 
 Phase 1 — Server + basic UI
-- Add `/changes`, `/diff`, `/file` (GET/PUT) endpoints and validations.
+- Add `/changes`, `/diff`, `/file` (GET/PUT) endpoints and validations. Use porcelain v2 and explicit `side`/`rev` params.
 - Render Changes panel with file lists for unstaged/staged and per‑file unified diff view (read‑only).
 
 Phase 2 — Merge & controls
 - Integrate CodeMirror Merge for per‑file hunk accept/reject and inline edits.
-- Wire Save/Stage/Unstage/Discard actions.
+- Wire Save/Stage/Unstage/Discard actions using `git restore`.
 
-Phase 3 — Polish & telemetry
-- Turn‑scoped “since this turn” labels.
-- Batch operations, keyboard shortcuts, and performance tuning.
-- Optional commit action (guarded/hidden by default).
+Phase 3 — Commits (feature-flagged)
+- `POST /git op=commit` behind a feature flag; commit staged changes only. Commit composer UI with templates.
+- Optional: create/switch branch helpers for isolation.
+
+Phase 4 — Push + PR (feature-flagged)
+- Detect remote and auth. Provide push via `git push` and PR creation via `gh pr create` (when available) or a hosted compare URL fallback.
+- Minimal PR body template that can include a link to the session transcript.
+
+Phase 5 — Polish & telemetry
+- Turn‑scoped “since this turn” labels and “Only new since this turn” filter.
+- Batch operations, keyboard shortcuts, virtualization, size/time caps, and instrumentation.
 
 ## References (current repo)
 
@@ -149,6 +165,7 @@ Phase 3 — Polish & telemetry
 ---
 
 Open Questions
-- Should we allow committing from the UI (off by default)?
 - Where to surface a “Promote to repo” flow (lift from worktree to the main branch) if desired?
-- Do we want server‑side diff generation for all files (`?all=1`) or keep it per‑file only to avoid large payloads?
+- For PR creation, should we prefer `gh` CLI (if present), Octokit REST, or just open a compare URL? Any provider priority (GitHub first)?
+- What limits do we want on diff size/file size/file count to guarantee UI snappiness on large repos?
+- Should symlink edits be allowed behind an explicit override, or always blocked?
