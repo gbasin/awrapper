@@ -358,7 +358,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
     (row as any).pending_approval = !!sessionApprovalWaits.get(id);
     const msgs = db.prepare('select * from messages where session_id = ? order by created_at asc limit 200').all(id) as Message[];
     const accept = String(req.headers['accept'] || '');
-    // If the client explicitly asks for HTML, serve a minimal session UI shell
+
+    // TEST ONLY (LEGACY): If the client explicitly asks for HTML, serve a minimal session UI shell
     if (accept.includes('text/html')) {
       const html = `<!doctype html>
 <html>

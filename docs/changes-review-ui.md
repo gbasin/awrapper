@@ -10,6 +10,8 @@ Provide a single, consistent UX to review and control code changes during a sess
 
 This lets users review before writes when approvals are needed, and review/curate after writes when approvals are pre‑granted or unnecessary — all in one “Changes” panel.
 
+All user interfaces described here live entirely within the single‑page app (SPA) — specifically the Session page. There are no server‑rendered pages for this feature; the server only exposes APIs consumed by the SPA.
+
 ## Goals
 
 - Show a live list of modifications “in progress” per session.
