@@ -165,6 +165,67 @@ Phase 5 — Polish & telemetry
 - Turn‑scoped “since this turn” labels and “Only new since this turn” filter.
 - Batch operations, keyboard shortcuts, virtualization, size/time caps, and instrumentation.
 
+## Acceptance Criteria & Test Plan
+
+Acceptance is scoped per phase, with hard pass/fail checks and a minimal test suite outline. Server tests use Vitest and Fastify’s inject; Git interactions run against temporary repos.
+
+Acceptance (Phase 1 — Server + basic UI)
+- Changes listing: `GET /sessions/:id/changes` returns `{ head, staged[], unstaged[] }`; when a rename exists, the entry includes `renamed_from`. Non‑Git worktrees return `{ gitAvailable:false }` with empty arrays.
+- Diff retrieval: `GET /sessions/:id/diff?path=...&side=worktree|index|head` returns unified text diff when text; returns `{ isBinary:true, size, sha }` when binary. Default side is `worktree`. `context` param adjusts hunk context.
+- File retrieval: `GET /sessions/:id/file?path=...&rev=head|index|worktree` returns `{ content, etag }`. Unknown path or rev returns 404.
+- Limits: Requests exceeding caps (per‑file diff > 500 KB or total payload > 2 MB) return 413 with a concise error body.
+- Path safety: Requests attempting path traversal or outside worktree return 400; symlink targets are rejected (400).
+- UI lists: The Changes panel renders Proposed cards from trace and Applied lists from `/changes`; per‑file read‑only diff loads on expand; “Only new since this turn” filter hides older entries when toggled.
+
+Acceptance (Phase 2 — Merge & controls)
+- Hunk controls: Merge view supports accept/reject; saving writes combined result via `PUT /file` and refreshes diff.
+- Stage/Unstage/Discard: `POST /git` with `op=stage|unstage|discardWorktree|discardIndex` updates `/changes` accordingly.
+- Concurrency safety: `PUT /file` with stale `expected_etag` (or OIDs) returns 409; UI shows a refresh affordance.
+
+Acceptance (Phase 3 — Commits, feature‑flagged)
+- Feature flag off: commit UI and API are hidden/disabled by default; attempts to call commit op return 404/400.
+- Commit path: with flag on, `POST /git { op:'commit', message }` creates a commit for staged files only; `/changes` becomes empty or reflects remaining unstaged edits.
+
+Acceptance (Phase 4 — Push + PR, feature‑flagged)
+- GH‑first PR: when `gh` CLI is available, “Create PR” uses `gh pr create`; on absence/failure, a compare URL opens.
+- Promote flow: “Promote to repo” opens Dry Run Summary; confirm performs commit→branch create/switch if needed→push→PR to default branch. No writes occur before confirm.
+
+Acceptance (Phase 5 — Polish & telemetry)
+- Performance: large file lists use virtualization; UI remains responsive with 200 changed files and 2 MB diff cap.
+- Telemetry: server logs include op, session id, latency, result (success/error) for `/changes`, `/diff`, `/file`, and `/git`.
+
+Security Acceptance
+- Realpath prefix checks enforce containment in worktree; all symlink writes are blocked. Attempts are logged and return 400.
+- Rate limits and body size limits applied to write endpoints (`PUT /file`, `POST /git`).
+
+Test Plan (Vitest)
+- Server unit tests
+  - `git porcelain v2` parser: parse rename, modify, delete, intent‑to‑add; robust quoting with special chars.
+  - Path guards: traversal (`..`), absolute paths, symlink targets → 400.
+  - Binary detection: `/diff` returns `{ isBinary:true, size, sha }` for binary files.
+  - Limits: large diffs and payloads return 413.
+- Server integration tests (Fastify inject)
+  - Temp repo fixture: init repo, create commits, branches, renames, staged vs unstaged changes.
+  - `/changes`: correct staged/unstaged classification; rename surfaces `renamed_from`.
+  - `/diff`: side switching (worktree/index/head) and `context` param; HEAD and index retrievals.
+  - `/file`: returns `etag`; `PUT /file` succeeds with matching `expected_etag` and returns 409 on mismatch; `stage:true` stages the file.
+  - `/git`: stage/unstage/discardWorktree/discardIndex behaviors reflect in `/changes`.
+- UI tests (lightweight)
+  - Component tests with mocked fetch: Proposed cards render from synthetic trace; Applied list renders from `/changes` snapshot; side toggle switches rendered diff source; “Only new since this turn” filter works.
+  - Merge view: accept/reject toggles call `PUT /file` with expected payload shape (mocked); stage/unstage buttons call `POST /git`.
+- E2E (required)
+  - Playwright end-to-end flows run in CI and gate merges. Cover at minimum:
+    - Phase 1: view Proposed and Applied lists; open per-file diff; toggle side; “Only new since this turn” filter.
+    - Phase 2: accept/reject hunks; save; stage/unstage/discard; verify changes reflect in UI and Git state.
+    - Phase 3 (flagged on in test env): commit staged changes; verify `/changes` empties or reflects remaining unstaged.
+    - Phase 4 (flagged on in test env): Promote with Dry Run Summary confirmation; branch create/switch if needed; push; PR creation via `gh` or compare URL fallback (mock tokens/CLI as needed).
+  - Provide a lightweight mock Git remote and stub `gh` when running in CI to avoid network.
+
+Fixtures & Utilities
+- Temp Git repo helper: creates a repo in a temp directory, exposes helpers to create/modify files, stage/commit, and compute expected HEAD/index OIDs.
+- Binary fixture: small binary blob (e.g., PNG) to verify `/diff` binary handling.
+- Large diff generator: utility to create files large enough to trigger limits.
+
 ## References (current repo)
 
 - Approvals endpoint: `src/server.ts:568`
