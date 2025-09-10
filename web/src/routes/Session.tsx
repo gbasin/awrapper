@@ -92,10 +92,10 @@ export default function Session() {
     try { localStorage.setItem('awrapper:logsWrap', wrap ? '1' : '0') } catch {}
   }, [wrap])
 
+  const planCtx = useMemo(() => selectCurrentPlan(tracesQ.traces), [tracesQ.traces])
   if (sess.isLoading) return <div>Loading…</div>
   if (sess.error) return <div className="text-red-600">Failed to load session</div>
   const s = sess.data!
-  const planCtx = useMemo(() => selectCurrentPlan(tracesQ.traces), [tracesQ.traces])
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">

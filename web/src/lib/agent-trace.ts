@@ -222,10 +222,20 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         break
       }
       case 'token_count': {
-        const input = num(e.msg?.input_tokens)
-        const output = num(e.msg?.output_tokens)
-        const total = num(e.msg?.total_tokens) || (input && output ? input + output : undefined)
-        t.tokens = input || output || total ? { input: input || 0, output: output || 0, total: total || (input || 0) + (output || 0) } : t.tokens
+        // Support both flat and nested { info: { total_token_usage: { ... } } } shapes
+        const flatIn = num(e.msg?.input_tokens)
+        const flatOut = num(e.msg?.output_tokens)
+        const flatTotal = num(e.msg?.total_tokens)
+        const nested = e.msg?.info?.total_token_usage || e.msg?.info || {}
+        const nIn = num(nested?.input_tokens)
+        const nOut = num(nested?.output_tokens)
+        const nTotal = num(nested?.total_tokens)
+        const input = flatIn ?? nIn
+        const output = flatOut ?? nOut
+        const total = flatTotal ?? nTotal ?? (input != null && output != null ? input + output : undefined)
+        if (input != null || output != null || total != null) {
+          t.tokens = { input: input ?? 0, output: output ?? 0, total: total ?? ((input ?? 0) + (output ?? 0)) }
+        }
         break
       }
       case 'exec_command_begin': {

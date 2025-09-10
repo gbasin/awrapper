@@ -11,11 +11,25 @@ const API_ORIGIN =
   `http://127.0.0.1:${process.env.AWRAPPER_API_PORT || process.env.API_PORT || 8787}`
 
 export default defineConfig({
+  build: {
+    sourcemap: true,
+  },
   plugins: [
     react(),
-    checker({ typescript: true }),
+    checker({
+      typescript: true,
+      eslint: {
+        // Use the project-local ESLint config to lint TS/TSX and enforce hooks rules
+        lintCommand: 'pnpm run lint',
+      },
+    }),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Ensure new SW takes control ASAP so new bundles are served immediately
+        clientsClaim: true,
+        skipWaiting: true,
+      },
       manifest: {
         name: 'awrapper',
         short_name: 'awrapper',

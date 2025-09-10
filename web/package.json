@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "pnpm build && playwright test",
     "test:e2e:ui": "playwright test --ui",
@@ -39,6 +40,9 @@
     "tailwind-merge": "^2.5.3"
   },
   "devDependencies": {
+    "@typescript-eslint/parser": "^8.7.0",
+    "eslint": "^9.10.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "@playwright/test": "^1.55.0",
     "@tailwindcss/typography": "^0.5.13",
     "@types/react": "^18.2.74",

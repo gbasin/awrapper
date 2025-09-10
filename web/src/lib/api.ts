@@ -53,7 +53,7 @@ export const api = {
     json(`/sessions/${id}/approvals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) }),
   tailLog: async (id: string, tail: number | 'all' = 800) => {
     const param = typeof tail === 'number' ? String(tail) : 'all'
-    const res = await fetch(`/sessions/${id}/log?tail=${param}`)
+    const res = await fetch(`/sessions/${id}/log?tail=${param}`, { cache: 'no-store', headers: { 'Accept': 'text/plain' } })
     return res.ok ? res.text() : ''
   },
 }

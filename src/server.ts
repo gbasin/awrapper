@@ -344,6 +344,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
       busy: !!locks.get(r.id),
       pending_approval: !!sessionApprovalWaits.get(r.id),
     }));
+    reply.header('Cache-Control', 'no-store');
     reply.send(withDerived);
   });
 
@@ -424,6 +425,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
       return reply.type('text/html').send(html);
     }
     // Default: JSON API response
+    reply.header('Cache-Control', 'no-store');
     reply.send({ ...row, messages: msgs.slice(-20) });
   });
 
@@ -451,6 +453,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
       ? 'select * from messages where session_id = ? and id > ? order by created_at asc limit 200'
       : 'select * from messages where session_id = ? order by created_at asc limit 200';
     const rows = after ? db.prepare(sql).all(id, after) : db.prepare(sql).all(id);
+    reply.header('Cache-Control', 'no-store');
     reply.send(rows);
   });
 
@@ -603,8 +606,10 @@ export async function buildServer(opts?: { listen?: boolean }) {
         const tail = Number(tailParam || 200);
         text = await tailFile(s.log_path, Number.isFinite(tail) && tail > 0 ? tail : 200);
       }
+      reply.header('Cache-Control', 'no-store');
       reply.type('text/plain').send(text);
     } catch {
+      reply.header('Cache-Control', 'no-store');
       reply.type('text/plain').send('');
     }
   });

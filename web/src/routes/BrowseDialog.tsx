@@ -40,6 +40,24 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
   }
 
   function Content() {
+    // Precompute crumbs/entries unconditionally to keep hooks ordering stable
+    const crumbs = useMemo(() => {
+      if (!data || 'roots' in data) return [] as Array<{ label: string; path: string }>
+      const parts = data.path.split('/').filter(Boolean)
+      const acc: Array<{ label: string; path: string }> = []
+      let current = data.path.startsWith('/') ? '/' : ''
+      for (let i = 0; i < parts.length; i++) {
+        current = current === '/' ? '/' + parts[i] : (current ? current + '/' : '') + parts[i]
+        acc.push({ label: parts[i], path: current })
+      }
+      return acc
+    }, [data && !('roots' in (data as any)) ? (data as ListResp).path : undefined])
+    const entries = useMemo(() => {
+      if (!data || 'roots' in data) return [] as ListResp['entries']
+      const list = onlyGit ? (data as ListResp).entries.filter((e) => e.is_repo) : (data as ListResp).entries
+      return list.slice().sort((a, b) => a.name.localeCompare(b.name))
+    }, [data, onlyGit])
+
     if (!data) return <div className="text-sm text-slate-500">Loading…</div>
     if ('roots' in data) {
       return (
@@ -57,17 +75,7 @@ export function BrowseDialog({ onSelect }: { onSelect: (path: string) => void })
         </div>
       )
     }
-    const entries = (onlyGit ? data.entries.filter((e) => e.is_repo) : data.entries).sort((a, b) => a.name.localeCompare(b.name))
-    const crumbs = useMemo(() => {
-      const parts = data.path.split('/').filter(Boolean)
-      const acc: Array<{ label: string; path: string }> = []
-      let current = data.path.startsWith('/') ? '/' : ''
-      for (let i = 0; i < parts.length; i++) {
-        current = current === '/' ? '/' + parts[i] : (current ? current + '/' : '') + parts[i]
-        acc.push({ label: parts[i], path: current })
-      }
-      return acc
-    }, [data.path])
+    // entries and crumbs were computed above
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between text-sm">
