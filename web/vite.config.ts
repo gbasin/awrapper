@@ -19,8 +19,9 @@ export default defineConfig({
     checker({
       typescript: true,
       eslint: {
-        // Use the project-local ESLint config to lint TS/TSX and enforce hooks rules
-        lintCommand: 'pnpm run lint',
+        // Use ESLint directly so vite-plugin-checker doesn't misparse `pnpm run` as patterns
+        // Matches the web package's lint script target
+        lintCommand: 'eslint "src/**/*.{ts,tsx}"',
       },
     }),
     VitePWA({
