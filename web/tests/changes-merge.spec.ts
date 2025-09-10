@@ -90,3 +90,22 @@ test('merge view saves and stages', async ({ page }) => {
   // Verify stage was NOT called when saving only
   await expect.poll(() => getStage()).toBe(false)
 })
+
+test('merge view save & stage triggers stage', async ({ page }) => {
+  const { id, getPut, getStage } = await stubApi(page)
+  await page.goto(`/s/${id}`)
+
+  // Expand the changed file
+  const fileRow = page.getByText('foo.txt')
+  await expect(fileRow).toBeVisible()
+  await fileRow.click()
+
+  // Switch to Merge and Save & Stage
+  await page.getByRole('button', { name: 'Merge' }).click()
+  await page.getByRole('button', { name: 'Save & Stage' }).click()
+
+  // Ensure save occurred
+  await expect.poll(() => getPut()).not.toBeNull()
+  // Stage should be called
+  await expect.poll(() => getStage()).toBe(true)
+})

@@ -541,13 +541,16 @@ export async function buildServer(opts?: { listen?: boolean }) {
     // Ensure Git available
     try { await execa('git', ['-C', wt, 'rev-parse', '--git-dir']); } catch { return reply.code(404).send({ error: 'git not available' }); }
 
+    // For head content, prefer using GET /file?rev=head from the client.
+    if (side === 'head') {
+      return reply.code(400).send({ error: 'unsupported side: head; use /file?rev=head for baseline content' });
+    }
     let args: string[] = ['-C', wt];
     if (side === 'index') args = args.concat(['diff', '--cached', `--unified=${context}`, '--', relPath]);
-    else if (side === 'head') args = args.concat(['diff', 'HEAD', 'HEAD', `--unified=${context}`, '--', relPath]);
     else args = args.concat(['diff', `--unified=${context}`, '--', relPath]);
 
     try {
-      const { stdout } = await execa('git', args);
+      const { stdout } = await execa('git', args, { timeout: 2000 });
       const text = stdout || '';
       const maxPer = 500 * 1024;
       if (text.length > maxPer) {
@@ -572,6 +575,9 @@ export async function buildServer(opts?: { listen?: boolean }) {
       reply.header('Cache-Control', 'no-store');
       return reply.send({ isBinary: false, diff: text });
     } catch (e: any) {
+      if (e && e.timedOut) {
+        return reply.code(504).send({ error: 'diff timeout' });
+      }
       return reply.code(500).send({ error: 'failed to get diff' });
     }
   });

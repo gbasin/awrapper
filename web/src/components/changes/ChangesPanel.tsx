@@ -298,37 +298,56 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'diff' | 'merge'>('diff')
   const [busy, setBusy] = useState<boolean>(false)
+  const [viewSide, setViewSide] = useState<'worktree' | 'index' | 'head'>(side)
   const qc = useQueryClient()
+  // Sync selected side when parent changes (e.g., switching tabs)
+  useEffect(() => { setViewSide(side) }, [side, entry.path])
+
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
       try {
-        const j = await api.getDiff(sessionId, entry.path, side, 3)
-        if (!cancelled) {
-          setIsBinary(!!j.isBinary)
-          setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+        if (viewSide === 'head') {
+          const f = await api.getFile(sessionId, entry.path, 'head')
+          if (!cancelled) {
+            setIsBinary(false)
+            setDiff(f.content || '')
+          }
+        } else {
+          const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
+          if (!cancelled) {
+            setIsBinary(!!j.isBinary)
+            setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+          }
         }
       } catch (e) {
-        if (!cancelled) setDiff('Failed to load diff')
+        if (!cancelled) setDiff('Failed to load')
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     if (open) load()
     return () => { cancelled = true }
-  }, [sessionId, entry.path, side, open])
+  }, [sessionId, entry.path, viewSide, open])
 
   async function doGit(op: 'stage' | 'unstage' | 'discardWorktree' | 'discardIndex') {
     try {
       setBusy(true)
+      if (viewSide === 'head') return
       await api.postGit(sessionId, { op, paths: [entry.path] } as any)
       // Refresh changes and diff after op
       await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
       // Reload diff for current side
-      const j = await api.getDiff(sessionId, entry.path, side, 3)
-      setIsBinary(!!j.isBinary)
-      setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+      if (viewSide === 'head') {
+        const f = await api.getFile(sessionId, entry.path, 'head')
+        setIsBinary(false)
+        setDiff(f.content || '')
+      } else {
+        const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
+        setIsBinary(!!j.isBinary)
+        setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+      }
     } catch {
       // noop; could surface toast
     } finally {
@@ -352,21 +371,31 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
           {/* Actions bar */}
           <div className="flex items-center justify-between px-2 py-1 border-b bg-white">
             <div className="inline-flex items-center gap-1">
-              {side === 'worktree' ? (
+              {viewSide === 'worktree' ? (
                 <>
                   <Button disabled={busy} size="sm" variant="secondary" onClick={() => doGit('stage')}>Stage</Button>
                   <Button disabled={busy} size="sm" variant="ghost" onClick={() => doGit('discardWorktree')}>Discard</Button>
                 </>
-              ) : (
+              ) : viewSide === 'index' ? (
                 <>
                   <Button disabled={busy} size="sm" variant="secondary" onClick={() => doGit('unstage')}>Unstage</Button>
                   <Button disabled={busy} size="sm" variant="ghost" onClick={() => doGit('discardIndex')}>Discard (index)</Button>
+                </>
+              ) : (
+                <>
+                  <Button disabled size="sm" variant="secondary" title="Actions disabled for HEAD view">Stage</Button>
+                  <Button disabled size="sm" variant="ghost" title="Actions disabled for HEAD view">Discard</Button>
                 </>
               )}
             </div>
             <div className="inline-flex items-center gap-1 rounded border p-0.5 bg-slate-50">
               <Button size="sm" variant={mode === 'diff' ? 'secondary' : 'ghost'} onClick={() => setMode('diff')}>Diff</Button>
-              <Button size="sm" disabled={isBinary} variant={mode === 'merge' ? 'secondary' : 'ghost'} onClick={() => setMode('merge')}>Merge</Button>
+              <Button size="sm" disabled={isBinary || viewSide === 'head'} variant={mode === 'merge' ? 'secondary' : 'ghost'} onClick={() => setMode('merge')}>Merge</Button>
+            </div>
+            <div className="inline-flex items-center gap-1 rounded border p-0.5 bg-slate-50">
+              <Button size="sm" variant={viewSide === 'worktree' ? 'secondary' : 'ghost'} onClick={() => setViewSide('worktree')}>Worktree</Button>
+              <Button size="sm" variant={viewSide === 'index' ? 'secondary' : 'ghost'} onClick={() => setViewSide('index')}>Index</Button>
+              <Button size="sm" variant={viewSide === 'head' ? 'secondary' : 'ghost'} onClick={() => setViewSide('head')}>Head</Button>
             </div>
           </div>
           {loading ? (
@@ -377,7 +406,9 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
             </ScrollArea>
           ) : (
             <div className="p-2">
-              {isBinary ? (
+              {viewSide === 'head' ? (
+                <div className="text-xs text-slate-600">HEAD view — merge disabled</div>
+              ) : isBinary ? (
                 <div className="text-xs text-slate-600">Binary file — merge disabled</div>
               ) : (
                 <MergeCM
@@ -385,9 +416,15 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
                   path={entry.path}
                   onSaved={async (staged) => {
                     await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
-                    const j = await api.getDiff(sessionId, entry.path, side, 3)
-                    setIsBinary(!!j.isBinary)
-                    setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+                    if (viewSide === 'head') {
+                      const f = await api.getFile(sessionId, entry.path, 'head')
+                      setIsBinary(false)
+                      setDiff(f.content || '')
+                    } else {
+                      const j = await api.getDiff(sessionId, entry.path, viewSide, 3)
+                      setIsBinary(!!j.isBinary)
+                      setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+                    }
                     if (staged) {
                       try { await api.postGit(sessionId, { op: 'stage', paths: [entry.path] }) } catch {}
                       await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
