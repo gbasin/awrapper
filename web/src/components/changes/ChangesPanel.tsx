@@ -7,6 +7,19 @@ import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
 import { Skeleton } from '../ui/skeleton'
 import { cn } from '../../lib/utils'
+import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '../ui/alert-dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog'
 
 export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?: Map<string, AgentTrace> }) {
   const [open, setOpen] = useState<boolean>(true)
@@ -79,6 +92,9 @@ export function ChangesPanel({ sessionId, traces }: { sessionId: string; traces?
                       {p.files.map((f) => (
                         <Badge key={f} variant="secondary" className="text-[11px]">{f}</Badge>
                       ))}
+                    </div>
+                    <div className="mt-2">
+                      <ApprovalActions sessionId={sessionId} callId={p.callId} files={p.files} />
                     </div>
                   </div>
                 ))
@@ -178,3 +194,134 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
   )
 }
 
+function ApprovalActions({ sessionId, callId, files }: { sessionId: string; callId: string; files: string[] }) {
+  const [deciding, setDeciding] = useState<null | 'approve' | 'deny' | 'session' | 'path'>(null)
+  const [pathDialogOpen, setPathDialogOpen] = useState(false)
+  const [pathValue, setPathValue] = useState('')
+  const [sessionConfirmOpen, setSessionConfirmOpen] = useState(false)
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        size="sm"
+        disabled={!sessionId || deciding !== null}
+        onClick={async () => {
+          try {
+            setDeciding('approve')
+            await api.sendApproval(sessionId, { call_id: callId, decision: 'approve', scope: 'once' })
+            toast.success('Approved')
+          } catch (e: any) {
+            toast.error(`Approve failed: ${e?.message || e}`)
+          } finally {
+            setDeciding(null)
+          }
+        }}
+      >
+        {deciding === 'approve' ? 'Approving…' : 'Approve once'}
+      </Button>
+      <AlertDialog open={sessionConfirmOpen} onOpenChange={setSessionConfirmOpen}>
+        <AlertDialogTrigger asChild>
+          <Button size="sm" variant="secondary" disabled={!sessionId || deciding !== null}>Approve for session</Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Approve all writes for this session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This allows the agent to perform subsequent write operations during this session without asking again. You can revoke by ending the session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild><Button variant="secondary">Cancel</Button></AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button
+                onClick={async () => {
+                  try {
+                    setDeciding('session')
+                    await api.sendApproval(sessionId, { call_id: callId, decision: 'approve', scope: 'session' })
+                    toast.success('Approved for session')
+                  } catch (e: any) {
+                    toast.error(`Approve failed: ${e?.message || e}`)
+                  } finally {
+                    setDeciding(null)
+                    setSessionConfirmOpen(false)
+                  }
+                }}
+              >
+                Confirm
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Dialog open={pathDialogOpen} onOpenChange={(o) => { setPathDialogOpen(o); if (o) setPathValue((v) => v || suggestPath(files)) }}>
+        <Button size="sm" variant="secondary" disabled={!sessionId || deciding !== null} onClick={() => setPathDialogOpen(true)}>Always allow path…</Button>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Always allow for a path/folder</DialogTitle>
+            <DialogDescription>Subsequent writes under this path will be allowed automatically for this session.</DialogDescription>
+          </DialogHeader>
+          <div className="mt-2">
+            <label className="block text-xs text-slate-600 mb-1" htmlFor={`path-${callId}`}>Path scope</label>
+            <input
+              id={`path-${callId}`}
+              className="w-full rounded border px-2 py-1 text-sm"
+              placeholder="e.g. src/ or docs/overview.md"
+              value={pathValue}
+              onChange={(e) => setPathValue(e.currentTarget.value)}
+            />
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPathDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={async () => {
+                const path = String(pathValue || '').trim()
+                if (!path) { toast.error('Enter a path'); return }
+                try {
+                  setDeciding('path')
+                  await api.sendApproval(sessionId, { call_id: callId, decision: 'approve', scope: 'path', path })
+                  toast.success(`Always allow: ${path}`)
+                  setPathDialogOpen(false)
+                } catch (e: any) {
+                  toast.error(`Approve failed: ${e?.message || e}`)
+                } finally {
+                  setDeciding(null)
+                }
+              }}
+            >
+              Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={!sessionId || deciding !== null}
+        onClick={async () => {
+          try {
+            setDeciding('deny')
+            await api.sendApproval(sessionId, { call_id: callId, decision: 'deny' })
+            toast.success('Denied')
+          } catch (e: any) {
+            toast.error(`Deny failed: ${e?.message || e}`)
+          } finally {
+            setDeciding(null)
+          }
+        }}
+      >
+        {deciding === 'deny' ? 'Denying…' : 'Deny'}
+      </Button>
+    </div>
+  )
+}
+
+function suggestPath(files: string[]): string {
+  if (!files || !files.length) return ''
+  const parts = files.map((f) => f.split('/')).sort((a, b) => a.length - b.length)
+  const base = parts[0]
+  let i = 0
+  for (; i < base.length; i++) {
+    const seg = base[i]
+    if (!files.every((f) => f.split('/')[i] === seg)) break
+  }
+  return i > 0 ? base.slice(0, i).join('/') + (i < base.length ? '/' : '') : ''
+}
