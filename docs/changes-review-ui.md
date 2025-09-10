@@ -74,8 +74,10 @@ Add minimal endpoints under `/sessions/:id/*` that operate only within the workt
 
 Security/validation:
 - Validate paths are under the session worktree using `realpath` prefix checks.
-- By default, block following or writing through symlinks.
+- Block following or writing through symlinks (always blocked; no override).
 - Rate‑limit and bound diff sizes, file sizes, and request durations.
+- Default limits (tunable): per-file diff ≤ 500 KB; total diff payload ≤ 2 MB; max changed files listed = 200; server timeout per diff = 2s.
+- Preflight checks for Promote/PR: verify remote exists, default branch detection, ahead/behind state, and `gh` availability (when selected). Provide graceful fallbacks.
 
 ## UI / Interaction Design
 
@@ -92,6 +94,12 @@ Pinned “Changes” panel in the Session page (similar to the Plan panel). Two 
   - Side toggle: Worktree | Index | HEAD for clarity and predictability.
   - Actions per file: Save (PUT `/file`), Stage/Unstage (POST `/git`), Discard (POST `/git` with `discardWorktree`/`discardIndex`). Bulk actions for selected files.
   - Auto‑refresh while a turn is running; manual refresh button otherwise. Add filter: “Only new since this turn”.
+  - Promote to repo (feature-flagged primary header action): opens a Dry Run Summary modal before performing any operations.
+
+Dry Run Summary (modal before Promote)
+- Shows: staged files (count, sizes), diff summary (insertions/deletions), proposed commit message (editable or link to open composer), suggested branch name, target base branch, remote name, PR title/body preview, and whether PR is draft.
+- Preflight results: remote present, branch state (ahead/behind/diverged), auth/`gh` availability when selected; surface fixes or fallback to compare URL.
+- Safety: no writes until confirm. Primary action “Promote” runs commit → branch create/switch (if needed) → push → create PR; secondary actions “Back to changes” and “Cancel”.
 
 Per‑turn context:
 - When `task_started` appears, snapshot the current file list in the client; annotate newly changed files as “since this turn”. This requires no extra server state.
@@ -148,8 +156,10 @@ Phase 3 — Commits (feature-flagged)
 - Optional: create/switch branch helpers for isolation.
 
 Phase 4 — Push + PR (feature-flagged)
-- Detect remote and auth. Provide push via `git push` and PR creation via `gh pr create` (when available) or a hosted compare URL fallback.
+- Detect remote and auth. Provide push via `git push` and PR creation via `gh pr create` when available (preferred). Fallback to opening a hosted compare URL. Add Octokit REST later as an additional option.
 - Minimal PR body template that can include a link to the session transcript.
+- “Promote to repo” one-click flow (header action in Applied panel): orchestrates commit → branch create/switch (if needed) → push → open PR to default branch.
+  - Includes a required Dry Run Summary modal (see UI section) with preflight checks and edit affordances before execution.
 
 Phase 5 — Polish & telemetry
 - Turn‑scoped “since this turn” labels and “Only new since this turn” filter.
@@ -164,8 +174,9 @@ Phase 5 — Polish & telemetry
 
 ---
 
-Open Questions
-- Where to surface a “Promote to repo” flow (lift from worktree to the main branch) if desired?
-- For PR creation, should we prefer `gh` CLI (if present), Octokit REST, or just open a compare URL? Any provider priority (GitHub first)?
-- What limits do we want on diff size/file size/file count to guarantee UI snappiness on large repos?
-- Should symlink edits be allowed behind an explicit override, or always blocked?
+Decisions
+- Promote to repo: surface as a primary action in the Applied section header (Changes panel), grouped with Commit and PR (feature-flagged). Also mirror in the session header overflow menu. Flow: commit (staged-only) → create/switch branch if detached → push → open PR to default branch.
+- PR creation: prefer `gh pr create` when the GitHub CLI is available; fallback to opening a compare URL. Add Octokit REST support later. Provider priority: GitHub first.
+- Limits (defaults; tunable via env/config): per-file diff ≤ 500 KB, total diff payload ≤ 2 MB, maximum listed changed files = 200, server timeout per diff = 2s.
+- Symlinks: always block edits through symlinks (no override). Show a non-blocking warning in the UI when encountered.
+- Promote flow requires a Dry Run Summary modal with preflight checks and previews; no side effects until confirm.
