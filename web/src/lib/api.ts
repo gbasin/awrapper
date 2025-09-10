@@ -56,4 +56,12 @@ export const api = {
     const res = await fetch(`/sessions/${id}/log?tail=${param}`, { cache: 'no-store', headers: { 'Accept': 'text/plain' } })
     return res.ok ? res.text() : ''
   },
+  // Changes Review API
+  getChanges: (id: string) => json<{ gitAvailable?: boolean; head: string | null; staged: Array<{ path: string; status: string; renamed_from?: string }>; unstaged: Array<{ path: string; status: string; renamed_from?: string }> }>(`/sessions/${id}/changes`),
+  getDiff: (id: string, path: string, side: 'worktree' | 'index' | 'head' = 'worktree', context = 3) =>
+    json<{ isBinary: boolean; diff?: string; size?: number; sha?: string }>(`/sessions/${id}/diff?${new URLSearchParams({ path, side, context: String(context) }).toString()}`),
+  getFile: (id: string, path: string, rev: 'head' | 'index' | 'worktree' = 'worktree') =>
+    json<{ content: string; etag: string }>(`/sessions/${id}/file?${new URLSearchParams({ path, rev }).toString()}`),
+  putFile: (id: string, body: { path: string; content: string; stage?: boolean; expected_etag?: string }) =>
+    json<{ ok: true }>(`/sessions/${id}/file`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }

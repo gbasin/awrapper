@@ -430,6 +430,234 @@ export async function buildServer(opts?: { listen?: boolean }) {
     reply.send({ ...row, messages: msgs.slice(-20) });
   });
 
+  // --- Changes Review API (Phase 1) ---
+  // List staged/unstaged changes for a session's worktree
+  app.get('/sessions/:id/changes', async (req, reply) => {
+    const { id } = req.params as any;
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+    // If not a Git repo, surface gitAvailable=false
+    let gitOk = false;
+    try {
+      const { stdout } = await execa('git', ['-C', wt, 'rev-parse', '--is-inside-work-tree']);
+      gitOk = String(stdout || '').trim() === 'true';
+    } catch {
+      gitOk = false;
+    }
+    if (!gitOk) {
+      reply.header('Cache-Control', 'no-store');
+      return reply.send({ gitAvailable: false, head: null, staged: [], unstaged: [] });
+    }
+
+    let head = '';
+    try {
+      const { stdout } = await execa('git', ['-C', wt, 'rev-parse', 'HEAD']);
+      head = (stdout || '').trim();
+    } catch {
+      head = '';
+    }
+
+    // Parse porcelain=v2 -z for robust path handling and renames
+    let staged: any[] = [];
+    let unstaged: any[] = [];
+    try {
+      const { stdout } = await execa('git', ['-C', wt, 'status', '--porcelain=v2', '-z']);
+      const parts = (stdout as any as string).split('\u0000');
+      for (let i = 0; i < parts.length; i++) {
+        const rec = parts[i];
+        if (!rec) continue;
+        const tag = rec[0];
+        if (tag === '1') {
+          // format: 1 <XY> ... <path>
+          const m = /^1\s+([^\s]+)\s+.*\s(.+)$/.exec(rec);
+          if (!m) continue;
+          const XY = m[1] || '';
+          const p = m[2] || '';
+          if (XY[0] && XY[0] !== '.') staged.push({ path: p, status: XY[0] });
+          if (XY[1] && XY[1] !== '.') unstaged.push({ path: p, status: XY[1] });
+        } else if (tag === '2') {
+          // rename/copy: 2 <XY> ... <score> <path>\0<orig_path>\0
+          const m = /^2\s+([^\s]+)\s+.*\s\d+\s(.+)$/.exec(rec);
+          if (!m) continue;
+          const XY = m[1] || '';
+          const p = m[2] || '';
+          const orig = parts[i + 1] || '';
+          // advance extra token consumed for orig path
+          i += 1;
+          if (XY[0] && XY[0] !== '.') staged.push({ path: p, status: XY[0], renamed_from: orig });
+          if (XY[1] && XY[1] !== '.') unstaged.push({ path: p, status: XY[1], renamed_from: orig });
+        } else if (tag === '?') {
+          // untracked
+          const p = rec.slice(2);
+          if (p) unstaged.push({ path: p, status: '?' });
+        } else if (tag === '!') {
+          // ignored — skip
+          continue;
+        }
+        // Cap lists to avoid huge payloads
+        if (staged.length > 200 || unstaged.length > 200) break;
+      }
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'failed to read changes' });
+    }
+    reply.header('Cache-Control', 'no-store');
+    reply.send({ gitAvailable: true, head, staged, unstaged });
+  });
+
+  // Returns unified diff text vs HEAD for a given path
+  app.get('/sessions/:id/diff', async (req, reply) => {
+    const { id } = req.params as any;
+    const q = (req.query as any) || {};
+    const relPath = String(q.path || '').trim();
+    const side = String(q.side || 'worktree');
+    const context = Math.max(0, Math.min(20, Number(q.context || 3) || 3));
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+
+    // Validate relPath
+    if (!relPath || relPath.includes('\u0000') || relPath.includes('..')) {
+      return reply.code(400).send({ error: 'invalid path' });
+    }
+    const abs = path.join(wt, relPath);
+    try {
+      const real = await fs.realpath(abs).catch(() => abs);
+      const realWt = await fs.realpath(wt).catch(() => wt);
+      const rel = path.relative(realWt, real);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        return reply.code(400).send({ error: 'path outside worktree' });
+      }
+      // If it's a symlink in worktree, reject
+      try { const st = await fs.lstat(abs); if (st.isSymbolicLink()) return reply.code(400).send({ error: 'symlinks not allowed' }); } catch {}
+    } catch {
+      // continue; git can still diff paths that don't exist in worktree (deleted files)
+    }
+
+    // Ensure Git available
+    try { await execa('git', ['-C', wt, 'rev-parse', '--git-dir']); } catch { return reply.code(404).send({ error: 'git not available' }); }
+
+    let args: string[] = ['-C', wt];
+    if (side === 'index') args = args.concat(['diff', '--cached', `--unified=${context}`, '--', relPath]);
+    else if (side === 'head') args = args.concat(['diff', 'HEAD', 'HEAD', `--unified=${context}`, '--', relPath]);
+    else args = args.concat(['diff', `--unified=${context}`, '--', relPath]);
+
+    try {
+      const { stdout } = await execa('git', args);
+      const text = stdout || '';
+      const maxPer = 500 * 1024;
+      if (text.length > maxPer) {
+        return reply.code(413).send({ error: 'diff too large' });
+      }
+      // Detect binary diff line
+      if (/^Binary files /m.test(text)) {
+        // Try to compute metadata
+        let size = 0;
+        let sha = '';
+        try {
+          const { stdout: shaOut } = await execa('git', ['-C', wt, 'rev-parse', `HEAD:${relPath}`]).catch(() => ({ stdout: '' } as any));
+          sha = (shaOut || '').trim();
+        } catch {}
+        try {
+          const st = await fs.stat(abs).catch(() => null as any);
+          size = st?.size || 0;
+        } catch {}
+        reply.header('Cache-Control', 'no-store');
+        return reply.send({ isBinary: true, size, sha });
+      }
+      reply.header('Cache-Control', 'no-store');
+      return reply.send({ isBinary: false, diff: text });
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'failed to get diff' });
+    }
+  });
+
+  // Get file contents from head|index|worktree
+  app.get('/sessions/:id/file', async (req, reply) => {
+    const { id } = req.params as any;
+    const q = (req.query as any) || {};
+    const relPath = String(q.path || '').trim();
+    const rev = String(q.rev || 'worktree');
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+    if (!relPath || relPath.includes('\u0000') || relPath.includes('..')) return reply.code(400).send({ error: 'invalid path' });
+    const abs = path.join(wt, relPath);
+    const realWt = await fs.realpath(wt).catch(() => wt);
+    const realCandidate = await fs.realpath(abs).catch(() => abs);
+    const rel = path.relative(realWt, realCandidate);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return reply.code(400).send({ error: 'path outside worktree' });
+    // Block symlink reads for safety
+    try { const st = await fs.lstat(abs); if (st.isSymbolicLink()) return reply.code(400).send({ error: 'symlinks not allowed' }); } catch {}
+
+    try {
+      let content = '';
+      if (rev === 'head') {
+        const { stdout } = await execa('git', ['-C', wt, 'show', `HEAD:${relPath}`]);
+        content = stdout || '';
+      } else if (rev === 'index') {
+        const { stdout } = await execa('git', ['-C', wt, 'show', `:${relPath}`]);
+        content = stdout || '';
+      } else {
+        content = await fs.readFile(abs, 'utf8');
+      }
+      const etag = await computeEtag(content);
+      reply.header('Cache-Control', 'no-store');
+      return reply.send({ content, etag });
+    } catch (e: any) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+  });
+
+  // Write a file to worktree, optionally stage
+  app.put('/sessions/:id/file', async (req, reply) => {
+    const { id } = req.params as any;
+    let body: any = (req.body as any) || {};
+    if (Buffer.isBuffer(body)) {
+      try { body = JSON.parse(body.toString('utf8')); } catch { body = {}; }
+    }
+    const relPath = String(body.path || '').trim();
+    const content = typeof body.content === 'string' ? body.content : '';
+    const stage = !!body.stage;
+    const expectedEtag = typeof body.expected_etag === 'string' ? body.expected_etag : undefined;
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+    if (!relPath || relPath.includes('\u0000') || relPath.includes('..')) return reply.code(400).send({ error: 'invalid path' });
+    const abs = path.join(wt, relPath);
+    const realWt = await fs.realpath(wt).catch(() => wt);
+    const realCandidate = await fs.realpath(path.dirname(abs)).catch(() => path.dirname(abs));
+    const rel = path.relative(realWt, realCandidate);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return reply.code(400).send({ error: 'path outside worktree' });
+    // Block writing through symlinks
+    try { const st = await fs.lstat(abs); if (st.isSymbolicLink()) return reply.code(400).send({ error: 'symlinks not allowed' }); } catch {}
+    // Concurrency guard: match expected_etag vs current worktree content
+    if (expectedEtag) {
+      try {
+        const cur = await fs.readFile(abs, 'utf8');
+        const curTag = await computeEtag(cur);
+        if (curTag !== expectedEtag) return reply.code(409).send({ error: 'etag mismatch' });
+      } catch {
+        // If file missing and expectedEtag provided, treat as mismatch
+        return reply.code(409).send({ error: 'etag mismatch' });
+      }
+    }
+    try {
+      await fs.ensureDir(path.dirname(abs));
+      await fs.writeFile(abs, content, 'utf8');
+      if (stage) {
+        try { await execa('git', ['-C', wt, 'add', '--', relPath]); } catch {}
+      }
+      reply.send({ ok: true });
+    } catch (e: any) {
+      reply.code(500).send({ error: 'failed to write file' });
+    }
+  });
+
   // Update session options (currently supports block_while_running)
   app.patch('/sessions/:id', async (req, reply) => {
     const { id } = req.params as any;
@@ -718,6 +946,11 @@ async function tailFile(filePath: string, n: number): Promise<string> {
   } catch {
     return '';
   }
+}
+
+async function computeEtag(text: string): Promise<string> {
+  const { createHash } = await import('node:crypto');
+  return createHash('sha256').update(text).digest('hex');
 }
 
 async function readWholeFile(filePath: string): Promise<string> {

@@ -18,6 +18,7 @@ import { Markdown } from '../components/ui/markdown'
 import { Switch } from '../components/ui/switch'
 import { useAgentTraces, type AgentTrace, type PlanState } from '../lib/agent-trace'
 import { TraceView } from '../components/trace/TraceView'
+import { ChangesPanel } from '../components/changes/ChangesPanel'
 
 export default function Session() {
   const { id = '' } = useParams()
@@ -241,6 +242,7 @@ export default function Session() {
                         sessionId={id}
                       />
                     ) : null}
+                    <ChangesPanel sessionId={id} traces={tracesQ.traces} />
                   </div>
                 )}
               </ScrollArea>
