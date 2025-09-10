@@ -40,6 +40,7 @@ function migrate(db: Database.Database) {
       error_message text,
       agent_log_hint text,
       artifact_dir text,
+      block_while_running integer,
       foreign key(agent_id) references agents(id)
     );
 
@@ -80,17 +81,24 @@ function migrate(db: Database.Database) {
           error_message text,
           agent_log_hint text,
           artifact_dir text,
+          block_while_running integer,
           foreign key(agent_id) references agents(id)
         );
       `);
       db.exec(`
-        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir)
-        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir
+        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, block_while_running)
+        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, 1
         from sessions;
       `);
       db.exec('drop table sessions');
       db.exec('alter table sessions_new rename to sessions');
       db.exec('COMMIT');
+    }
+    // Add block_while_running if missing
+    const hasBlock = cols.some((c) => c.name === 'block_while_running');
+    if (!hasBlock) {
+      db.exec('ALTER TABLE sessions ADD COLUMN block_while_running integer');
+      db.exec('UPDATE sessions SET block_while_running = 1 WHERE block_while_running IS NULL');
     }
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch {}
@@ -123,6 +131,7 @@ export type Session = {
   error_message?: string | null;
   agent_log_hint?: string | null;
   artifact_dir?: string | null;
+  block_while_running?: 0 | 1;
 };
 
 export type Message = {

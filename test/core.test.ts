@@ -84,14 +84,20 @@ describe('awrapper core flow', () => {
     });
     expect(msgRes.statusCode).toBe(200);
 
-    // Fetch messages and find assistant reply
-    // Poll for a moment in case of slight delay
+    // Fetch messages and find assistant reply with non-empty content
+    // Poll briefly to tolerate async streaming updates
     let got = '';
     for (let i = 0; i < 20; i++) {
       const list = await app.inject({ method: 'GET', url: `/sessions/${id}/messages` });
       const arr = list.json();
       const assts = arr.filter((m: any) => m.role === 'assistant');
-      if (assts.length) { got = assts[assts.length - 1].content; break; }
+      if (assts.length) {
+        const last = assts[assts.length - 1];
+        if (last.content && String(last.content).length > 0) {
+          got = last.content;
+          break;
+        }
+      }
       await new Promise((r) => setTimeout(r, 50));
     }
     expect(got).toBe('Echo: Hello');

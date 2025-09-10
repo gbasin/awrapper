@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo, currentBranch } from './git.js';
-import { acquireLock, procs, protoSessions, releaseLock } from './state.js';
+import { acquireLock, procs, protoSessions, releaseLock, locks } from './state.js';
 import { spawnPersistentCodex } from './sessionProc.js';
 import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS, DEFAULT_USE_WORKTREE } from './config.js';
 import fs from 'fs-extra';
@@ -133,7 +133,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const branch = body.branch as string | undefined;
     const use_worktree = typeof body.use_worktree === 'boolean' ? body.use_worktree : DEFAULT_USE_WORKTREE;
     const initial_message = body.initial_message as string | undefined;
-    app.log.info({ agent_id, repo_path, branch, use_worktree, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
+    const block_while_running = typeof body.block_while_running === 'boolean' ? !!body.block_while_running : true;
+    app.log.info({ agent_id, repo_path, branch, use_worktree, block_while_running, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
     // Validate repo path
     try {
@@ -159,9 +160,9 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const { logPath, artifactDir } = await (await import('./sessionProc.js')).setupPaths(id);
     const now = Date.now();
     db.prepare(
-      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, status, started_at, log_path, agent_log_hint, artifact_dir)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir);
+      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, status, started_at, log_path, agent_log_hint, artifact_dir, block_while_running)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir, block_while_running ? 1 : 0);
 
     try {
       db.prepare('update sessions set status = ? where id = ?').run('starting', id);
@@ -293,7 +294,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
   app.get('/sessions', async (_req, reply) => {
     const db = getDb();
     const rows = db.prepare('select * from sessions order by started_at desc limit 100').all() as any[];
-    const withDerived = rows.map((r) => ({ ...r, status: computeDisplayStatus(r) }));
+    const withDerived = rows.map((r) => ({ ...r, status: computeDisplayStatus(r), busy: !!locks.get(r.id) }));
     reply.send(withDerived);
   });
 
@@ -303,6 +304,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const row = db.prepare('select * from sessions where id = ?').get(id) as Session | undefined;
     if (!row) return reply.code(404).send({ error: 'not found' });
     (row as any).status = computeDisplayStatus(row as any);
+    (row as any).busy = !!locks.get(id);
     const msgs = db.prepare('select * from messages where session_id = ? order by created_at asc limit 200').all(id) as Message[];
     const accept = String(req.headers['accept'] || '');
     // If the client explicitly asks for HTML, serve a minimal session UI shell
@@ -375,6 +377,22 @@ export async function buildServer(opts?: { listen?: boolean }) {
     reply.send({ ...row, messages: msgs.slice(-20) });
   });
 
+  // Update session options (currently supports block_while_running)
+  app.patch('/sessions/:id', async (req, reply) => {
+    const { id } = req.params as any;
+    const body = (req.body as any) || {};
+    const db = getDb();
+    const row = db.prepare('select * from sessions where id = ?').get(id) as Session | undefined;
+    if (!row) return reply.code(404).send({ error: 'not found' });
+    if (typeof body.block_while_running === 'boolean') {
+      db.prepare('update sessions set block_while_running = ? where id = ?').run(body.block_while_running ? 1 : 0, id);
+    }
+    const updated = db.prepare('select * from sessions where id = ?').get(id) as any;
+    updated.status = computeDisplayStatus(updated);
+    updated.busy = !!locks.get(id);
+    reply.send(updated);
+  });
+
   app.get('/sessions/:id/messages', async (req, reply) => {
     const { id } = req.params as any;
     const after = (req.query as any).after as string | undefined;
@@ -428,6 +446,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
           const full = hint ? `${msg} (${hint})` : msg;
           db.prepare('update sessions set status = ?, error_message = ? where id = ?').run('error', full, id);
           (req as any).log.warn({ id, err: msg }, 'Failed to revive session process');
+          releaseLock(id);
           return reply.code(503).send({ error: 'Failed to revive agent process', message: full });
         }
       }
@@ -465,49 +484,58 @@ export async function buildServer(opts?: { listen?: boolean }) {
         if (DEBUG) (req as any).log.info({ id, messages: rows.length, clen: preface.length }, 'Hydrated turn after revive');
       }
 
-      const runId = proto.sendUserInput(contentToSend, turnId);
+      const runId = proto!.sendUserInput(contentToSend, turnId);
       // Insert a placeholder assistant message immediately and stream updates
       const asstMsgId = crypto.randomUUID();
       db.prepare('insert into messages (id, session_id, turn_id, role, content, created_at) values (?, ?, ?, ?, ?, ?)')
         .run(asstMsgId, id, turnId, 'assistant', '', Date.now());
-      let assistantContent = '';
-      // Throttled DB update for streaming deltas
-      let flushTimer: NodeJS.Timeout | null = null;
-      const flushMs = 200; // max ~5 updates/sec
-      const flushSoon = () => {
-        if (flushTimer) return;
-        flushTimer = setTimeout(() => {
-          try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
-          flushTimer = null;
-        }, flushMs);
-      };
 
-      const off = proto.onEvent((ev) => {
-        try {
-          if (ev.id !== runId) return;
-          const t = ev.msg?.type;
-          if (t === 'agent_message_delta') {
-            assistantContent += String(ev.msg?.delta || '');
-            flushSoon();
-          } else if (t === 'agent_message') {
-            assistantContent = String(ev.msg?.message || '');
+      // ACK immediately so the client can reset UI state
+      reply.send({ turn_id: turnId, user_message_id: userMsgId, assistant_message_id: asstMsgId });
+
+      // Continue streaming in the background and release the lock when done
+      (async () => {
+        let assistantContent = '';
+        // Throttled DB update for streaming deltas
+        let flushTimer: NodeJS.Timeout | null = null;
+        const flushMs = 200; // max ~5 updates/sec
+        const flushSoon = () => {
+          if (flushTimer) return;
+          flushTimer = setTimeout(() => {
             try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
-          }
-        } catch (_) { /* best-effort streaming */ }
-      });
-      try {
-        assistantContent = await proto.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
-      } catch (err: any) {
-        assistantContent = `Error: ${String(err?.message || err)}`;
-      }
-      try { off(); } catch {}
-      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-      // Finalize assistant content
-      db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId);
-      if (DEBUG) (req as any).log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Assistant message persisted');
-      return reply.send({ turn_id: turnId, user_message_id: userMsgId, assistant_message_id: asstMsgId });
-    } finally {
-      releaseLock(id);
+            flushTimer = null;
+          }, flushMs);
+        };
+
+        const off = proto!.onEvent((ev) => {
+          try {
+            if (ev.id !== runId) return;
+            const t = ev.msg?.type;
+            if (t === 'agent_message_delta') {
+              assistantContent += String(ev.msg?.delta || '');
+              flushSoon();
+            } else if (t === 'agent_message') {
+              assistantContent = String(ev.msg?.message || '');
+              try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+            }
+          } catch (_) { /* best-effort streaming */ }
+        });
+        try {
+          assistantContent = await proto!.awaitTaskComplete(runId, TURN_TIMEOUT_SECS * 1000);
+        } catch (err: any) {
+          assistantContent = `Error: ${String(err?.message || err)}`;
+        }
+        try { off(); } catch {}
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        // Finalize assistant content
+        try { db.prepare('update messages set content = ? where id = ?').run(assistantContent, asstMsgId); } catch {}
+        if (DEBUG) (req as any).log.info({ id, turnId, userMsgId, asstMsgId, alen: assistantContent.length }, 'Assistant message persisted');
+        releaseLock(id);
+      })().catch(() => { try { releaseLock(id); } catch {} });
+    } catch (e: any) {
+      // On synchronous failure, ensure lock is released and surface error
+      try { releaseLock(id); } catch {}
+      return reply.code(500).send({ error: String(e?.message || e || 'failed to start turn') });
     }
   });
 

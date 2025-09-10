@@ -2,10 +2,12 @@ export type Session = {
   id: string
   agent_id: string
   status: string
+  busy?: boolean
   repo_path: string
   branch: string | null
   started_at: number
   last_activity_at: number | null
+  block_while_running?: boolean | 0 | 1
 }
 
 export type Message = {
@@ -27,7 +29,7 @@ export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
   getConfig: () => json<{ default_use_worktree: boolean }>('/config'),
-  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean }) => {
+  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean; block_while_running?: boolean }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -45,6 +47,7 @@ export const api = {
   },
   listMessages: (id: string) => json<Message[]>(`/sessions/${id}/messages`),
   sendMessage: (id: string, content: string) => json(`/sessions/${id}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) }),
+  updateSession: (id: string, body: Partial<Pick<Session, 'block_while_running'>>) => json<Session>(`/sessions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   sendApproval: (id: string, body: { call_id: string; decision: 'approve' | 'deny'; scope?: 'once' | 'session' | 'path'; path?: string; reason?: string }) =>
     json(`/sessions/${id}/approvals`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) }),
   tailLog: async (id: string, tail: number | 'all' = 800) => {

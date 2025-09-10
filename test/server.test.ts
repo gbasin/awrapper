@@ -23,6 +23,23 @@ vi.mock('../src/sessionProc.js', () => {
   };
 });
 
+// Mock proto session to avoid needing a real Codex process; emulate quick streaming
+vi.mock('../src/proto.js', () => {
+  class CodexProtoSession {
+    constructor(_proc: any) {}
+    onEvent(_cb: any) { return () => {}; }
+    sendUserInput(_text: string, runId = crypto.randomUUID()) { return runId; }
+    async awaitTaskComplete(_runId: string) {
+      // Simulate a short-running turn to keep the lock briefly
+      await new Promise((r) => setTimeout(r, 100));
+      return 'ok';
+    }
+    async configureSession() { /* no-op */ }
+    sendApprovalDecision() { /* no-op */ }
+  }
+  return { CodexProtoSession };
+});
+
 let app: import('fastify').FastifyInstance;
 let repoDir: string;
 
@@ -85,5 +102,51 @@ describe('sessions routes', () => {
     expect(html).toContain("fetch('/sessions/' + id + '/messages?after=', { headers: { 'Accept': 'application/json' } })");
     // Guard that polling failures are contained and do not break event wiring
     expect(html).toContain('poll().catch(() => {})');
+  });
+
+  it('POST /messages acknowledges immediately and enforces lock', async () => {
+    // Create a fresh session
+    const create = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir }, headers: { 'content-type': 'application/json' } });
+    expect(create.statusCode).toBe(200);
+    const { id } = create.json() as any;
+
+    // Send a message and verify quick ACK with IDs
+    const t0 = Date.now();
+    const res1 = await app.inject({ method: 'POST', url: `/sessions/${id}/messages`, payload: { content: 'hello' }, headers: { 'content-type': 'application/json' } });
+    const dt = Date.now() - t0;
+    expect(res1.statusCode).toBe(200);
+    // Should not block for long; allow a generous threshold
+    expect(dt).toBeLessThan(500);
+    const j1 = res1.json() as any;
+    expect(typeof j1.turn_id).toBe('string');
+    expect(typeof j1.user_message_id).toBe('string');
+    expect(typeof j1.assistant_message_id).toBe('string');
+
+    // Assistant placeholder should be present immediately
+    const msgs = await app.inject({ method: 'GET', url: `/sessions/${id}/messages` });
+    expect(msgs.statusCode).toBe(200);
+    const arr = msgs.json() as any[];
+    const assistant = arr.find((m) => m.id === j1.assistant_message_id);
+    expect(assistant).toBeTruthy();
+
+    // While the background turn is in flight, a second POST should be rejected
+    const res2 = await app.inject({ method: 'POST', url: `/sessions/${id}/messages`, payload: { content: 'second' }, headers: { 'content-type': 'application/json' } });
+    expect(res2.statusCode).toBe(409);
+  });
+
+  it('stores block_while_running per session and allows updating it', async () => {
+    const create = await app.inject({ method: 'POST', url: '/sessions', payload: { repo_path: repoDir }, headers: { 'content-type': 'application/json' } });
+    expect(create.statusCode).toBe(200);
+    const { id } = create.json() as any;
+
+    const s1 = await app.inject({ method: 'GET', url: `/sessions/${id}` });
+    expect(s1.statusCode).toBe(200);
+    const j1 = s1.json() as any;
+    expect(j1.block_while_running === 1 || j1.block_while_running === true).toBeTruthy();
+
+    const upd = await app.inject({ method: 'PATCH', url: `/sessions/${id}`, payload: { block_while_running: false }, headers: { 'content-type': 'application/json' } });
+    expect(upd.statusCode).toBe(200);
+    const j2 = upd.json() as any;
+    expect(j2.block_while_running === 0 || j2.block_while_running === false).toBeTruthy();
   });
 });

@@ -26,6 +26,7 @@ export default function NewSession() {
       return raw == null ? true : JSON.parse(raw)
     } catch { return true }
   })
+  const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
@@ -79,6 +80,10 @@ export default function NewSession() {
               />
               <span title="When off, the agent runs directly in your repo. Not isolated; may modify your working tree. If you set a branch, it must match the current checkout.">Use Git worktree (recommended)</span>
             </div>
+            <div className="flex items-center gap-2 sm:col-span-2 md:col-span-3">
+              <Switch checked={blockWhileRunning} onCheckedChange={setBlockWhileRunning} />
+              <span title="When on, the UI disables Send while a turn is running.">Block while running</span>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col min-h-0">
@@ -99,7 +104,7 @@ export default function NewSession() {
                 onSubmit={(e) => {
                   e.preventDefault()
                   if (!repo.trim()) return
-                  m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree })
+                  m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree, block_while_running: blockWhileRunning })
                 }}
               >
                 <Button type="submit" disabled={m.isPending}>{m.isPending ? 'Creating…' : 'Create session'}</Button>

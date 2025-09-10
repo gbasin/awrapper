@@ -36,6 +36,20 @@ export default function Session() {
     enabled: logsOpen,
   })
   const m = useMutation({ mutationFn: (content: string) => api.sendMessage(id, content), onSuccess: () => setText('') })
+  const hasRunningTurn = useMemo(() => {
+    const t = tracesQ.traces
+    if (!t) return false
+    for (const v of t.values()) { if (v.status === 'running') return true }
+    return false
+  }, [tracesQ.traces])
+  const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
+  // Initialize from server session (defaults true)
+  useEffect(() => {
+    const s = sess.data
+    if (!s) return
+    const v = typeof s.block_while_running === 'boolean' ? s.block_while_running : s.block_while_running === 1
+    setBlockWhileRunning(v ?? true)
+  }, [sess.data])
   const viewportRef = useRef<HTMLDivElement>(null)
   const [wrap, setWrap] = useState<boolean>(() => {
     try {
@@ -92,11 +106,15 @@ export default function Session() {
               <span className="truncate">{s.id}</span>
               <Badge
                 variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
-                title={s.status}
-                aria-label={s.status}
+                title={s.status === 'running' && !s.busy ? 'ready' : s.status}
+                aria-label={s.status === 'running' && !s.busy ? 'ready' : s.status}
               >
                 {s.status === 'running' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  s.busy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  )
                 ) : s.status === 'queued' ? (
                   <Clock className="h-3.5 w-3.5" />
                 ) : s.status === 'closed' ? (
@@ -226,7 +244,7 @@ export default function Session() {
                   </div>
                 )}
               </ScrollArea>
-              <form className="flex gap-2 border-t p-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) m.mutate(text) }}>
+              <form className="flex gap-2 border-t p-2" onSubmit={(e) => { e.preventDefault(); if (text.trim() && !(blockWhileRunning && hasRunningTurn)) m.mutate(text) }}>
                 <Textarea
                   rows={3}
                   value={text}
@@ -234,14 +252,24 @@ export default function Session() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                       e.preventDefault()
-                      if (text.trim() && !m.isPending) m.mutate(text)
+                      if (text.trim() && !m.isPending && !(blockWhileRunning && hasRunningTurn)) m.mutate(text)
                     }
                   }}
                   placeholder="Type a message… (Cmd/Ctrl+Enter to send)"
                 />
-                <Button disabled={m.isPending} className="self-start" type="submit">
-                  {m.isPending ? 'Sending…' : (<><Send className="mr-2 h-4 w-4" /> Send</>)}
-                </Button>
+                <div className="flex flex-col items-end gap-2">
+                  <Button disabled={m.isPending || (blockWhileRunning && hasRunningTurn)} className="self-start" type="submit">
+                    {m.isPending ? 'Sending…' : (<><Send className="mr-2 h-4 w-4" /> Send</>)}
+                  </Button>
+                  <label className="flex items-center gap-2 text-[11px] text-slate-600 select-none">
+                    <span>Block while running</span>
+                    <Switch checked={blockWhileRunning} onCheckedChange={(v) => {
+                      setBlockWhileRunning(v)
+                      // Persist to server; let polling update session object later
+                      api.updateSession(id, { block_while_running: v }).catch(() => {})
+                    }} />
+                  </label>
+                </div>
               </form>
             </div>
           </div>

@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { Skeleton } from './ui/skeleton'
 import { cn } from '../lib/utils'
-import { PanelLeftClose, PanelLeftOpen, Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2 } from 'lucide-react'
 import { useCallback, useRef } from 'react'
 
 export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { open: boolean; onClose: () => void; onOpen: () => void; width: number; onResize: (w: number) => void }) {
@@ -93,11 +93,11 @@ export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { ope
                           <Badge
                             variant={badgeVariant(s.status)}
                             className="shrink-0 text-[10px]"
-                            title={s.status}
-                            aria-label={s.status}
+                            title={s.status === 'running' && !s.busy ? 'ready' : s.status}
+                            aria-label={s.status === 'running' && !s.busy ? 'ready' : s.status}
                           >
                             {s.status === 'running' ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
+                              s.busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />
                             ) : s.status === 'queued' ? (
                               <Clock className="h-3 w-3" />
                             ) : s.status === 'closed' ? (
@@ -156,7 +156,7 @@ export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { ope
                   title={`${s.id}\n${s.repo_path}${s.branch ? ` @ ${s.branch}` : ''}`}
                   className={cn('block h-8 w-8 rounded-full border flex items-center justify-center', activeId === s.id ? 'border-slate-400 ring-2 ring-slate-200' : 'border-transparent')}
                 >
-                  {collapsedStatusIcon(s.status)}
+                  {collapsedStatusIcon(s.status, s.busy)}
                 </Link>
               </li>
             ))}
@@ -185,11 +185,11 @@ function timeKey(s: Session): number {
   return (s.last_activity_at ?? s.started_at ?? 0) as number
 }
 
-function collapsedStatusIcon(status: string) {
+function collapsedStatusIcon(status: string, busy?: boolean) {
   // Use same iconography as expanded list for consistency
   // while keeping a compact visual for the collapsed rail.
   const base = 'h-4 w-4'
-  if (status === 'running') return <Loader2 className={`${base} animate-spin text-emerald-600`} />
+  if (status === 'running') return busy ? <Loader2 className={`${base} animate-spin text-emerald-600`} /> : <CheckCircle2 className={`${base} text-emerald-600`} />
   if (status === 'queued') return <Clock className={`${base} text-amber-600`} />
   if (status === 'stale') return <Clock className={`${base} text-slate-500`} />
   if (status === 'closed') return <MinusCircle className={`${base} text-slate-500`} />

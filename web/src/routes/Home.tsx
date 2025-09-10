@@ -11,7 +11,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
 import { Skeleton } from '../components/ui/skeleton'
-import { Loader2, Clock, MinusCircle, HelpCircle } from 'lucide-react'
+import { Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2 } from 'lucide-react'
 import { Switch } from '../components/ui/switch'
 
 export default function Home() {
@@ -32,6 +32,7 @@ export default function Home() {
       return raw == null ? true : JSON.parse(raw)
     } catch { return true }
   })
+  const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
@@ -79,7 +80,7 @@ export default function Home() {
             className="grid gap-2 sm:grid-cols-2 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault()
-              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree })
+              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree, block_while_running: blockWhileRunning })
             }}
           >
             <div className="flex items-center gap-2">
@@ -119,6 +120,10 @@ export default function Home() {
                 Use Git worktree (recommended)
               </span>
             </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={blockWhileRunning} onCheckedChange={setBlockWhileRunning} />
+              <span title="When on, the UI disables Send while a turn is running.">Block while running</span>
+            </div>
             {/* lifecycle selection removed: always persistent */}
             <Textarea placeholder="Initial message (optional)" value={initial} onChange={(e) => setInitial(e.target.value)} className="sm:col-span-2 md:col-span-3" />
             <div className="sm:col-span-2 md:col-span-3">
@@ -156,11 +161,15 @@ function SessionsTable({ rows }: { rows: Session[] }) {
               <Td>
                 <Badge
                   variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
-                  title={s.status}
-                  aria-label={s.status}
+                  title={s.status === 'running' && !s.busy ? 'ready' : s.status}
+                  aria-label={s.status === 'running' && !s.busy ? 'ready' : s.status}
                 >
                   {s.status === 'running' ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    s.busy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    )
                   ) : s.status === 'queued' ? (
                     <Clock className="h-3.5 w-3.5" />
                   ) : s.status === 'closed' ? (
