@@ -143,6 +143,10 @@ export class CodexProtoSession {
     let acc = '';
     return new Promise<string>((resolve, reject) => {
       let timer: NodeJS.Timeout | null = null;
+      // When the agent requests approval, we pause the inactivity timer
+      // until a subsequent event for this run arrives (i.e., after the
+      // approval decision is processed). Default: infinite pause.
+      let pausedForApproval = false;
       const reset = () => {
         if (timeoutMs <= 0) return; // 0 (or negative) disables inactivity timeout
         if (timer) clearTimeout(timer);
@@ -155,6 +159,18 @@ export class CodexProtoSession {
       const off = this.onEvent((ev) => {
         if (ev.id !== runId) return;
         const t = ev.msg?.type;
+        // Pause timeout while waiting for user approval
+        if (t === 'apply_patch_approval_request') {
+          if (timer) clearTimeout(timer);
+          timer = null;
+          pausedForApproval = true;
+          return; // do not reset timer while paused
+        }
+        // Any event other than approval while paused resumes the timer
+        if (pausedForApproval) {
+          pausedForApproval = false;
+          reset();
+        }
         if (t === 'agent_message' && typeof ev.msg?.message === 'string') {
           acc += (acc ? '\n' : '') + ev.msg.message;
           reset();

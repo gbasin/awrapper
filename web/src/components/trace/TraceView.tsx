@@ -3,7 +3,7 @@ import { AgentTrace, ToolCall, ReasoningSection, formatDuration } from '../../li
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { cn } from '../../lib/utils'
-import { Copy, Lightbulb, MessageSquareText, Wrench, ChevronRight, Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react'
+import { Copy, Lightbulb, MessageSquareText, Wrench, ChevronRight, Loader2, CheckCircle2, XCircle, Clock, Key } from 'lucide-react'
 import { toast } from 'sonner'
 import { Markdown } from '../ui/markdown'
 import { api } from '../../lib/api'
@@ -34,11 +34,13 @@ export function TraceView({ trace, className, showAssistant = true, sessionId }:
       >
         <div className="flex items-center gap-2 text-sm text-slate-700">
           <Badge
-            variant={trace.status === 'running' ? 'secondary' : trace.status === 'success' ? 'success' : trace.status === 'error' ? 'danger' : 'secondary'}
-            title={trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
-            aria-label={trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
+            variant={trace.status === 'waiting_approval' ? 'warning' : trace.status === 'running' ? 'secondary' : trace.status === 'success' ? 'success' : trace.status === 'error' ? 'danger' : 'secondary'}
+            title={trace.status === 'waiting_approval' ? 'Awaiting approval' : trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
+            aria-label={trace.status === 'waiting_approval' ? 'Awaiting approval' : trace.status === 'running' ? 'Running' : trace.status === 'success' ? 'Succeeded' : trace.status === 'error' ? 'Failed' : 'Timed out'}
           >
-            {trace.status === 'running' ? (
+            {trace.status === 'waiting_approval' ? (
+              <Key className="h-3.5 w-3.5" />
+            ) : trace.status === 'running' ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : trace.status === 'success' ? (
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -93,7 +95,8 @@ export function TraceView({ trace, className, showAssistant = true, sessionId }:
 
 function buildSummary(t: AgentTrace): string {
   const parts: string[] = []
-  if (t.reasoningSections.length > 0) parts.push('Thinking')
+  if (t.status === 'waiting_approval') parts.push('Waiting for approval')
+  else if (t.reasoningSections.length > 0) parts.push('Thinking')
   if (t.tools.length > 0) parts.push(`${t.tools.length} tools`)
   const dur = (t.completedAt || Date.now()) - (t.startedAt || Date.now())
   if (t.startedAt) parts.push(formatDuration(dur))

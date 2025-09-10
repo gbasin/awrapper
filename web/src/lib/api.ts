@@ -3,6 +3,7 @@ export type Session = {
   agent_id: string
   status: string
   busy?: boolean
+  pending_approval?: boolean
   repo_path: string
   branch: string | null
   started_at: number

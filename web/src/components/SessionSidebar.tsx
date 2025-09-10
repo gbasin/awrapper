@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { Skeleton } from './ui/skeleton'
 import { cn } from '../lib/utils'
-import { PanelLeftClose, PanelLeftOpen, Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2 } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2, Key } from 'lucide-react'
 import { useCallback, useRef } from 'react'
 
 export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { open: boolean; onClose: () => void; onOpen: () => void; width: number; onResize: (w: number) => void }) {
@@ -85,18 +85,25 @@ export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { ope
                 <ul className="space-y-1 px-2">
                   {q.data
                     .slice()
-                    .sort((a, b) => timeKey(b) - timeKey(a))
+                    .sort((a, b) => {
+                      const pa = a.pending_approval ? 1 : 0
+                      const pb = b.pending_approval ? 1 : 0
+                      if (pb !== pa) return pb - pa
+                      return timeKey(b) - timeKey(a)
+                    })
                     .map((s) => (
                     <li key={s.id}>
                       <Link to={`/s/${s.id}`} className={itemClass(activeId === s.id)}>
                         <div className="flex items-center gap-2 min-w-0">
                           <Badge
-                            variant={badgeVariant(s.status)}
+                            variant={s.pending_approval ? 'warning' : badgeVariant(s.status)}
                             className="shrink-0 text-[10px]"
                             title={s.status === 'running' && !s.busy ? 'ready' : s.status}
                             aria-label={s.status === 'running' && !s.busy ? 'ready' : s.status}
                           >
-                            {s.status === 'running' ? (
+                            {s.pending_approval ? (
+                              <Key className="h-3 w-3" />
+                            ) : s.status === 'running' ? (
                               s.busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />
                             ) : s.status === 'queued' ? (
                               <Clock className="h-3 w-3" />
@@ -149,14 +156,19 @@ export function SessionSidebar({ open, onClose, onOpen, width, onResize }: { ope
         {q.data && q.data.length === 0 && <div className="rotate-90 text-[10px] text-slate-500">empty</div>}
         <div className="flex-1 overflow-y-auto">
           <ul className="flex flex-col items-center gap-3">
-            {q.data?.slice().sort((a,b)=>timeKey(b)-timeKey(a)).map((s) => (
+            {q.data?.slice().sort((a,b)=>{
+              const pa = a.pending_approval ? 1 : 0
+              const pb = b.pending_approval ? 1 : 0
+              if (pb !== pa) return pb - pa
+              return timeKey(b) - timeKey(a)
+            }).map((s) => (
               <li key={s.id}>
                 <Link
                   to={`/s/${s.id}`}
                   title={`${s.id}\n${s.repo_path}${s.branch ? ` @ ${s.branch}` : ''}`}
                   className={cn('block h-8 w-8 rounded-full border flex items-center justify-center', activeId === s.id ? 'border-slate-400 ring-2 ring-slate-200' : 'border-transparent')}
                 >
-                  {collapsedStatusIcon(s.status, s.busy)}
+                  {collapsedStatusIcon(s.status, s.busy, s.pending_approval)}
                 </Link>
               </li>
             ))}
@@ -185,10 +197,11 @@ function timeKey(s: Session): number {
   return (s.last_activity_at ?? s.started_at ?? 0) as number
 }
 
-function collapsedStatusIcon(status: string, busy?: boolean) {
+function collapsedStatusIcon(status: string, busy?: boolean, pending?: boolean) {
   // Use same iconography as expanded list for consistency
   // while keeping a compact visual for the collapsed rail.
   const base = 'h-4 w-4'
+  if (pending) return <Key className={`${base} text-amber-600`} />
   if (status === 'running') return busy ? <Loader2 className={`${base} animate-spin text-emerald-600`} /> : <CheckCircle2 className={`${base} text-emerald-600`} />
   if (status === 'queued') return <Clock className={`${base} text-amber-600`} />
   if (status === 'stale') return <Clock className={`${base} text-slate-500`} />

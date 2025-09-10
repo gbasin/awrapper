@@ -7,12 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { getDb, type Session, type Message } from './db.js';
 import { ensureWorktree, isGitRepo, currentBranch } from './git.js';
-import { acquireLock, procs, protoSessions, releaseLock, locks } from './state.js';
+import { acquireLock, procs, protoSessions, releaseLock, locks, sessionApprovalWaits } from './state.js';
 import { spawnPersistentCodex } from './sessionProc.js';
 import { DEFAULT_BIND, DEFAULT_PORT, BROWSE_ROOTS, DEBUG, HTTP_LOG, PROTO_TRY_CONFIGURE, LOG_LEVEL, TURN_TIMEOUT_SECS, DEFAULT_USE_WORKTREE } from './config.js';
 import fs from 'fs-extra';
 import { CodexProtoSession } from './proto.js';
 import { ensureAgentsRegistry } from './agents.js';
+import { execa } from 'execa';
 
 export async function buildServer(opts?: { listen?: boolean }) {
   const app = Fastify({
@@ -54,6 +55,30 @@ export async function buildServer(opts?: { listen?: boolean }) {
     ensureAgentsRegistry();
   } catch (_) {
     // Best-effort; routes will still work without crashing if init fails
+  }
+
+  // Detect and log which Codex binary/version will be used for sessions
+  try {
+    const configured = process.env.CODEX_BIN || 'codex';
+    let resolved = configured;
+    if (!configured.includes(path.sep)) {
+      try {
+        const which = await execa('bash', ['-lc', `command -v ${configured} || which ${configured} || true`]);
+        resolved = (which.stdout || configured).trim() || configured;
+      } catch {
+        // keep fallback
+      }
+    }
+    let version = '';
+    try {
+      const v = await execa(configured, ['--version']);
+      version = (v.stdout || '').trim();
+    } catch (e: any) {
+      version = `unavailable (${String(e?.shortMessage || e?.message || e || '')})`;
+    }
+    app.log.info({ codex_bin: configured, resolved_path: resolved, version }, 'Codex binary detected');
+  } catch (e: any) {
+    app.log.warn({ err: String(e?.message || e) }, 'Failed to detect Codex binary');
   }
 
   // Minimal placeholder favicon to avoid 404 noise
@@ -172,6 +197,23 @@ export async function buildServer(opts?: { listen?: boolean }) {
       // Attach proto session handler
       const proto = new CodexProtoSession(proc!);
       protoSessions.set(id, proto);
+      // Track approval wait state to surface in /sessions
+      const offApproval = proto.onEvent((ev) => {
+        try {
+          const runId = String(ev.id || '');
+          if (!runId) return;
+          const t = String(ev.msg?.type || '');
+          let set = sessionApprovalWaits.get(id);
+          if (!set) { set = new Set<string>(); }
+          if (t === 'apply_patch_approval_request') {
+            set.add(runId);
+            sessionApprovalWaits.set(id, set);
+          } else if (set.has(runId)) {
+            set.delete(runId);
+            if (set.size === 0) sessionApprovalWaits.delete(id); else sessionApprovalWaits.set(id, set);
+          }
+        } catch {}
+      });
       if (PROTO_TRY_CONFIGURE) {
         try { await proto.configureSession(worktree_path); } catch {}
       }
@@ -268,6 +310,8 @@ export async function buildServer(opts?: { listen?: boolean }) {
           .run('closed', code ?? null, Date.now(), id);
         procs.delete(id);
         protoSessions.delete(id);
+        try { offApproval(); } catch {}
+        try { sessionApprovalWaits.delete(id); } catch {}
       });
     } catch (err: any) {
       const msg = String(err?.shortMessage || err?.message || err || 'Failed to start agent');
@@ -294,7 +338,12 @@ export async function buildServer(opts?: { listen?: boolean }) {
   app.get('/sessions', async (_req, reply) => {
     const db = getDb();
     const rows = db.prepare('select * from sessions order by started_at desc limit 100').all() as any[];
-    const withDerived = rows.map((r) => ({ ...r, status: computeDisplayStatus(r), busy: !!locks.get(r.id) }));
+    const withDerived = rows.map((r) => ({
+      ...r,
+      status: computeDisplayStatus(r),
+      busy: !!locks.get(r.id),
+      pending_approval: !!sessionApprovalWaits.get(r.id),
+    }));
     reply.send(withDerived);
   });
 
@@ -305,6 +354,7 @@ export async function buildServer(opts?: { listen?: boolean }) {
     if (!row) return reply.code(404).send({ error: 'not found' });
     (row as any).status = computeDisplayStatus(row as any);
     (row as any).busy = !!locks.get(id);
+    (row as any).pending_approval = !!sessionApprovalWaits.get(id);
     const msgs = db.prepare('select * from messages where session_id = ? order by created_at asc limit 200').all(id) as Message[];
     const accept = String(req.headers['accept'] || '');
     // If the client explicitly asks for HTML, serve a minimal session UI shell

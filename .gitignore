@@ -157,3 +157,8 @@ node_modules/.cache/turbo/
 
 # awrapper local worktrees (tool-generated, safe to ignore)
 .awrapper-worktrees/
+
+# Playwright (web app) artifacts
+web/test-results/
+web/playwright-report/
+web/blob-report/

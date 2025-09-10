@@ -7,7 +7,7 @@ export type PlanState = { items: PlanItem[]; explanation?: string; updatedAt?: n
 
 export type AgentTrace = {
   runId: string
-  status: 'running' | 'success' | 'error' | 'timeout'
+  status: 'running' | 'success' | 'error' | 'timeout' | 'waiting_approval'
   startedAt?: number
   completedAt?: number
   tokens?: { input: number; output: number; total: number }
@@ -133,9 +133,9 @@ export function useAgentTraces(sessionId: string) {
 }
 
 export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
-  const byRun = new Map<string, AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number }>()
+  const byRun = new Map<string, AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number; _waitingApproval?: boolean }>()
 
-  function ensure(runId: string): AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number } {
+  function ensure(runId: string): AgentTrace & { _toolMap: Map<string, ToolCall>; _reasoningIdx: number; _seq: number; _waitingApproval?: boolean } {
     let t = byRun.get(runId)
     if (!t) {
       t = {
@@ -154,6 +154,7 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         _toolMap: new Map(),
         _reasoningIdx: -1,
         _seq: 0,
+        _waitingApproval: false,
       }
       byRun.set(runId, t)
     }
@@ -164,6 +165,13 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
     const runId = e.id || ''
     if (!runId) continue
     const t = ensure(runId)
+
+    // If we were waiting for approval and any subsequent event arrives,
+    // resume the run status back to running (until completion or error).
+    if (t._waitingApproval && e.type !== 'apply_patch_approval_request') {
+      t._waitingApproval = false
+      if (t.status === 'waiting_approval') t.status = 'running'
+    }
 
     switch (e.type) {
       case 'task_started': {
@@ -281,6 +289,8 @@ export function buildTraces(events: RawEvent[]): Map<string, AgentTrace> {
         if (callId) {
           t.approvals.push({ callId, changes, justification })
         }
+        t._waitingApproval = true
+        t.status = 'waiting_approval'
         break
       }
       case 'update_plan':

@@ -50,7 +50,7 @@ Web builds include TypeScript checking via `vite-plugin-checker`, so Vite will f
 - `CODEX_BIN`: path to `codex` binary if not on PATH.
 - `OPENAI_API_KEY`: required for Codex to call OpenAI.
 - `AWRAPPER_DEBUG`/`DEBUG`: enable verbose server logs and client debug integration.
-- `AWRAPPER_TURN_TIMEOUT_SECS` (or `TURN_TIMEOUT_SECS`): inactivity timeout for a single user turn in persistent sessions. The timer resets on any agent event (reasoning/message/tool/etc). Default 600 seconds. Set to `0` to disable.
+- `AWRAPPER_TURN_TIMEOUT_SECS` (or `TURN_TIMEOUT_SECS`): inactivity timeout for a single user turn in persistent sessions. The timer resets on any agent event (reasoning/message/tool/etc). Default 600 seconds. Set to `0` to disable. Note: the timeout is paused while awaiting user approvals (e.g., file write requests).
 
 ### Web dev proxy
 

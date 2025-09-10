@@ -11,7 +11,7 @@ import { Textarea } from '../components/ui/textarea'
 import { Badge } from '../components/ui/badge'
 import { BrowseDialog } from './BrowseDialog'
 import { Skeleton } from '../components/ui/skeleton'
-import { Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2 } from 'lucide-react'
+import { Loader2, Clock, MinusCircle, HelpCircle, CheckCircle2, Key } from 'lucide-react'
 import { Switch } from '../components/ui/switch'
 
 export default function Home() {
@@ -150,21 +150,33 @@ function SessionsTable({ rows }: { rows: Session[] }) {
           </Tr>
         </Thead>
         <Tbody>
-          {rows.map((s) => (
-            <Tr key={s.id}>
-              <Td className="font-medium">
-                <Link className="text-blue-600 hover:underline" to={`/s/${s.id}`}>
-                  {s.id}
-                </Link>
-              </Td>
-              <Td>{s.agent_id}</Td>
-              <Td>
+          {rows
+            .slice()
+            .sort((a, b) => {
+              const pa = a.pending_approval ? 1 : 0
+              const pb = b.pending_approval ? 1 : 0
+              if (pb !== pa) return pb - pa
+              const ta = (a.last_activity_at ?? a.started_at ?? 0) as number
+              const tb = (b.last_activity_at ?? b.started_at ?? 0) as number
+              return tb - ta
+            })
+            .map((s) => (
+          <Tr key={s.id}>
+            <Td className="font-medium">
+              <Link className="text-blue-600 hover:underline" to={`/s/${s.id}`}>
+                {s.id}
+              </Link>
+            </Td>
+            <Td>{s.agent_id}</Td>
+            <Td>
                 <Badge
-                  variant={s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
-                  title={s.status === 'running' && !s.busy ? 'ready' : s.status}
-                  aria-label={s.status === 'running' && !s.busy ? 'ready' : s.status}
+                  variant={s.pending_approval ? 'warning' : s.status === 'running' ? 'success' : s.status === 'queued' ? 'warning' : (s.status === 'closed' || s.status === 'stale') ? 'secondary' : 'outline'}
+                  title={s.pending_approval ? 'awaiting approval' : (s.status === 'running' && !s.busy ? 'ready' : s.status)}
+                  aria-label={s.pending_approval ? 'awaiting approval' : (s.status === 'running' && !s.busy ? 'ready' : s.status)}
                 >
-                  {s.status === 'running' ? (
+                  {s.pending_approval ? (
+                    <Key className="h-3.5 w-3.5" />
+                  ) : s.status === 'running' ? (
                     s.busy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
