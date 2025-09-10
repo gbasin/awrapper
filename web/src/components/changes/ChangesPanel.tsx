@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { AgentTrace } from '../../lib/agent-trace'
 import { Badge } from '../ui/badge'
@@ -7,6 +7,7 @@ import { Button } from '../ui/button'
 import { ScrollArea } from '../ui/scroll-area'
 import { Skeleton } from '../ui/skeleton'
 import { cn } from '../../lib/utils'
+import { MergeHunks } from './MergeHunks'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -148,7 +149,11 @@ function AppliedChanges({ sessionId, tab, onTabChange, staged, unstaged }: { ses
 
 function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: string; entry: { path: string; status: string; renamed_from?: string }; side: 'worktree' | 'index'; open: boolean; onToggle: () => void }) {
   const [diff, setDiff] = useState<string>('')
+  const [isBinary, setIsBinary] = useState<boolean>(false)
   const [loading, setLoading] = useState(false)
+  const [mode, setMode] = useState<'diff' | 'merge'>('diff')
+  const [busy, setBusy] = useState<boolean>(false)
+  const qc = useQueryClient()
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -156,6 +161,7 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
       try {
         const j = await api.getDiff(sessionId, entry.path, side, 3)
         if (!cancelled) {
+          setIsBinary(!!j.isBinary)
           setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
         }
       } catch (e) {
@@ -167,6 +173,23 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
     if (open) load()
     return () => { cancelled = true }
   }, [sessionId, entry.path, side, open])
+
+  async function doGit(op: 'stage' | 'unstage' | 'discardWorktree' | 'discardIndex') {
+    try {
+      setBusy(true)
+      await api.postGit(sessionId, { op, paths: [entry.path] } as any)
+      // Refresh changes and diff after op
+      await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
+      // Reload diff for current side
+      const j = await api.getDiff(sessionId, entry.path, side, 3)
+      setIsBinary(!!j.isBinary)
+      setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+    } catch {
+      // noop; could surface toast
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="rounded border bg-white">
       <button type="button" onClick={onToggle} className="w-full flex items-center justify-between px-2 py-1 text-sm hover:bg-slate-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-slate-300">
@@ -181,12 +204,55 @@ function FileDiff({ sessionId, entry, side, open, onToggle }: { sessionId: strin
       </button>
       {open && (
         <div className="border-t bg-slate-50">
+          {/* Actions bar */}
+          <div className="flex items-center justify-between px-2 py-1 border-b bg-white">
+            <div className="inline-flex items-center gap-1">
+              {side === 'worktree' ? (
+                <>
+                  <Button disabled={busy} size="sm" variant="secondary" onClick={() => doGit('stage')}>Stage</Button>
+                  <Button disabled={busy} size="sm" variant="ghost" onClick={() => doGit('discardWorktree')}>Discard</Button>
+                </>
+              ) : (
+                <>
+                  <Button disabled={busy} size="sm" variant="secondary" onClick={() => doGit('unstage')}>Unstage</Button>
+                  <Button disabled={busy} size="sm" variant="ghost" onClick={() => doGit('discardIndex')}>Discard (index)</Button>
+                </>
+              )}
+            </div>
+            <div className="inline-flex items-center gap-1 rounded border p-0.5 bg-slate-50">
+              <Button size="sm" variant={mode === 'diff' ? 'secondary' : 'ghost'} onClick={() => setMode('diff')}>Diff</Button>
+              <Button size="sm" disabled={isBinary} variant={mode === 'merge' ? 'secondary' : 'ghost'} onClick={() => setMode('merge')}>Merge</Button>
+            </div>
+          </div>
           {loading ? (
             <Skeleton className="h-24 w-full" />
-          ) : (
+          ) : mode === 'diff' ? (
             <ScrollArea className="max-h-72">
               <pre className={cn('text-xs whitespace-pre p-2')}>{diff}</pre>
             </ScrollArea>
+          ) : (
+            <div className="p-2">
+              {isBinary ? (
+                <div className="text-xs text-slate-600">Binary file — merge disabled</div>
+              ) : (
+                <MergeHunks
+                  sessionId={sessionId}
+                  path={entry.path}
+                  onSaved={async (staged) => {
+                    // Refresh list + diff after save
+                    await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
+                    const j = await api.getDiff(sessionId, entry.path, side, 3)
+                    setIsBinary(!!j.isBinary)
+                    setDiff(j.isBinary ? `Binary file (size: ${j.size ?? 0} bytes)` : (j.diff || ''))
+                    // Optionally stage after save
+                    if (staged) {
+                      try { await api.postGit(sessionId, { op: 'stage', paths: [entry.path] }) } catch {}
+                      await qc.invalidateQueries({ queryKey: ['changes', sessionId] })
+                    }
+                  }}
+                />
+              )}
+            </div>
           )}
         </div>
       )}

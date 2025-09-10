@@ -658,6 +658,72 @@ export async function buildServer(opts?: { listen?: boolean }) {
     }
   });
 
+  // Git operations for the session worktree (stage/unstage/discard)
+  app.post('/sessions/:id/git', async (req, reply) => {
+    const { id } = req.params as any;
+    let body: any = (req.body as any) || {};
+    if (Buffer.isBuffer(body)) {
+      try { body = JSON.parse(body.toString('utf8')); } catch { body = {}; }
+    }
+    const op = String(body.op || '').trim();
+    const paths = Array.isArray(body.paths) ? (body.paths as any[]).map((p) => String(p || '').trim()).filter(Boolean) : [];
+    if (!op) return reply.code(400).send({ error: 'missing op' });
+    if (['stage', 'unstage', 'discardWorktree', 'discardIndex', 'commit'].indexOf(op) === -1) {
+      return reply.code(400).send({ error: 'unsupported op' });
+    }
+    const db = getDb();
+    const s = db.prepare('select worktree_path from sessions where id = ?').get(id) as { worktree_path: string } | undefined;
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    const wt = s.worktree_path;
+    // Ensure Git available
+    try { await execa('git', ['-C', wt, 'rev-parse', '--git-dir']); } catch { return reply.code(404).send({ error: 'git not available' }); }
+
+    // Commit is feature-flagged (disabled by default)
+    if (op === 'commit') {
+      return reply.code(404).send({ error: 'commit disabled' });
+    }
+
+    // Validate and guard paths
+    const safePaths: string[] = [];
+    for (const p of paths) {
+      if (!p || p.includes('\u0000') || p.includes('..')) return reply.code(400).send({ error: 'invalid path' });
+      const abs = path.join(wt, p);
+      const realWt = await fs.realpath(wt).catch(() => wt);
+      const realCand = await fs.realpath(path.dirname(abs)).catch(() => path.dirname(abs));
+      const rel = path.relative(realWt, realCand);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) return reply.code(400).send({ error: 'path outside worktree' });
+      // Avoid following symlinks directly
+      try { const st = await fs.lstat(abs); if (st.isSymbolicLink()) return reply.code(400).send({ error: 'symlinks not allowed' }); } catch {}
+      safePaths.push(p);
+    }
+
+    try {
+      if (op === 'stage') {
+        if (safePaths.length === 0) return reply.code(400).send({ error: 'paths required' });
+        await execa('git', ['-C', wt, 'add', '--'].concat(safePaths));
+      } else if (op === 'unstage') {
+        if (safePaths.length === 0) return reply.code(400).send({ error: 'paths required' });
+        await execa('git', ['-C', wt, 'restore', '--staged', '--'].concat(safePaths));
+      } else if (op === 'discardWorktree') {
+        if (safePaths.length === 0) return reply.code(400).send({ error: 'paths required' });
+        // Discard tracked changes
+        try { await execa('git', ['-C', wt, 'restore', '--worktree', '--'].concat(safePaths)); } catch {}
+        // Remove untracked files if present (best-effort)
+        for (const p of safePaths) {
+          try { await execa('git', ['-C', wt, 'clean', '-f', '--', p]); } catch {}
+        }
+      } else if (op === 'discardIndex') {
+        if (safePaths.length === 0) return reply.code(400).send({ error: 'paths required' });
+        await execa('git', ['-C', wt, 'restore', '--staged', '--'].concat(safePaths));
+      } else {
+        return reply.code(400).send({ error: 'unsupported op' });
+      }
+      reply.send({ ok: true });
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'git op failed', message: String(e?.shortMessage || e?.message || e || '') });
+    }
+  });
+
   // Update session options (currently supports block_while_running)
   app.patch('/sessions/:id', async (req, reply) => {
     const { id } = req.params as any;

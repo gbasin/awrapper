@@ -64,4 +64,12 @@ export const api = {
     json<{ content: string; etag: string }>(`/sessions/${id}/file?${new URLSearchParams({ path, rev }).toString()}`),
   putFile: (id: string, body: { path: string; content: string; stage?: boolean; expected_etag?: string }) =>
     json<{ ok: true }>(`/sessions/${id}/file`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  postGit: (
+    id: string,
+    body:
+      | { op: 'stage'; paths: string[] }
+      | { op: 'unstage'; paths: string[] }
+      | { op: 'discardWorktree'; paths: string[] }
+      | { op: 'discardIndex'; paths: string[] }
+  ) => json<{ ok: true }>(`/sessions/${id}/git`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
 }
