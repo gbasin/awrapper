@@ -218,6 +218,44 @@ export default function Session() {
             </Dialog>
           </div>
           <div className="text-xs text-slate-500 truncate" title={`${s.repo_path}${s.branch ? ` @ ${s.branch}` : ''}`}>{s.repo_path}{s.branch ? ` @ ${s.branch}` : ''}</div>
+          {/* Session settings chips */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {/* Model */}
+            {s.model && (
+              <Badge variant="secondary" title={`Model: ${s.model}`} aria-label={`model ${s.model}`} className="text-[11px] py-0.5">
+                {s.model}
+              </Badge>
+            )}
+            {/* Approval Policy */}
+            {s.approval_policy && (
+              <Badge variant="secondary" title={`Approval policy: ${s.approval_policy}`} aria-label={`approval ${s.approval_policy}`} className="text-[11px] py-0.5 capitalize">
+                {s.approval_policy}
+              </Badge>
+            )}
+            {/* Sandbox Mode */}
+            {s.sandbox_mode && (
+              <Badge variant="secondary" title={`Sandbox: ${s.sandbox_mode}`} aria-label={`sandbox ${s.sandbox_mode}`} className="text-[11px] py-0.5">
+                {s.sandbox_mode}
+              </Badge>
+            )}
+            {/* Tools */}
+            {(() => {
+              const on = (v: any) => v === 1 || v === true;
+              const Tool = ({ label, enabled, title }: { label: string; enabled: boolean; title: string }) => (
+                <Badge variant={enabled ? 'success' : 'outline'} title={title} aria-label={`${label} ${enabled ? 'enabled' : 'disabled'}`} className="text-[11px] py-0.5">
+                  {label}
+                </Badge>
+              );
+              return (
+                <>
+                  <Tool label="Plan" enabled={on(s.include_plan_tool)} title="Plan tool (update_plan)" />
+                  <Tool label="Web" enabled={on(s.web_search)} title="Web search tool" />
+                  <Tool label="Patch" enabled={on((s as any).include_apply_patch_tool)} title="Apply patch tool" />
+                  <Tool label="Image" enabled={on((s as any).include_view_image_tool)} title="View image tool" />
+                </>
+              );
+            })()}
+          </div>
         </CardHeader>
         <CardContent className="flex flex-col min-h-0">
           <div className="mt-1 flex-1 min-h-0">
