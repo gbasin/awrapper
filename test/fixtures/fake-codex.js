@@ -37,6 +37,8 @@ async function runExec(args) {
 
 async function runProto() {
   printCwd();
+  // Log argv for assertions (helps verify -c overrides)
+  process.stdout.write(`ARGS:${JSON.stringify(process.argv.slice(2))}\n`);
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   const pending = new Map(); // callId -> { runId }
   rl.on('line', (line) => {
@@ -97,10 +99,14 @@ async function main() {
     console.error('usage: codex <exec|proto> ...');
     process.exit(2);
   }
-  // Allow optional -a=never before subcommand
-  const argsNoPolicy = argv[0].startsWith('-a=') ? argv.slice(1) : argv;
-  const cmd = argsNoPolicy[0];
-  const rest = argsNoPolicy.slice(1);
+  // Allow optional leading flags like -a=never and repeated [-c key=value] pairs before subcommand
+  let idx = 0;
+  if (argv[idx] && argv[idx].startsWith('-a=')) idx += 1;
+  while (argv[idx] === '-c' && idx + 1 < argv.length) {
+    idx += 2;
+  }
+  const cmd = argv[idx];
+  const rest = argv.slice(idx + 1);
   if (cmd === 'exec') {
     await runExec(rest);
   } else if (cmd === 'proto') {

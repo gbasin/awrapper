@@ -34,7 +34,7 @@ export default function Home() {
   })
   const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
   // Minimal: read defaults so we can include them even if not shown
-  const [cfg, setCfg] = useState<{ model_default?: string; approval_policy_default?: string; sandbox_mode_default?: string; include_plan_tool_default?: boolean; web_search_default?: boolean } | null>(null)
+  const [cfg, setCfg] = useState<{ model_default?: string; approval_policy_default?: string; sandbox_mode_default?: string; include_plan_tool_default?: boolean; web_search_default?: boolean; include_apply_patch_tool_default?: boolean; include_view_image_tool_default?: boolean } | null>(null)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
@@ -94,6 +94,8 @@ export default function Home() {
                 sandbox_mode: (cfg?.sandbox_mode_default as any) || 'workspace-write',
                 include_plan_tool: cfg?.include_plan_tool_default ?? true,
                 web_search: cfg?.web_search_default ?? true,
+                include_apply_patch_tool: cfg?.include_apply_patch_tool_default ?? true,
+                include_view_image_tool: cfg?.include_view_image_tool_default ?? true,
               })
             }}
           >

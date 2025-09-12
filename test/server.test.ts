@@ -149,4 +149,30 @@ describe('sessions routes', () => {
     const j2 = upd.json() as any;
     expect(j2.block_while_running === 0 || j2.block_while_running === false).toBeTruthy();
   });
+
+  it('persists session settings (model/tools/policies)', async () => {
+    const body = {
+      repo_path: repoDir,
+      model: 'gpt-5-high',
+      approval_policy: 'never',
+      sandbox_mode: 'workspace-write',
+      include_plan_tool: true,
+      web_search: true,
+      include_apply_patch_tool: false,
+      include_view_image_tool: true,
+    };
+    const create = await app.inject({ method: 'POST', url: '/sessions', payload: body, headers: { 'content-type': 'application/json' } });
+    expect(create.statusCode).toBe(200);
+    const { id } = create.json() as any;
+    const s1 = await app.inject({ method: 'GET', url: `/sessions/${id}` });
+    expect(s1.statusCode).toBe(200);
+    const row = s1.json() as any;
+    expect(row.model).toBe('gpt-5-high');
+    expect(row.approval_policy).toBe('never');
+    expect(row.sandbox_mode).toBe('workspace-write');
+    expect(row.include_plan_tool === 1 || row.include_plan_tool === true).toBeTruthy();
+    expect(row.web_search === 1 || row.web_search === true).toBeTruthy();
+    expect(row.include_apply_patch_tool === 0 || row.include_apply_patch_tool === false).toBeTruthy();
+    expect(row.include_view_image_tool === 1 || row.include_view_image_tool === true).toBeTruthy();
+  });
 });

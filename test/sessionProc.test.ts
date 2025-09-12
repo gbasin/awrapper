@@ -43,8 +43,8 @@ describe('sessionProc uses cwd instead of -C', () => {
     expect(c.bin).toBe('codex');
     expect(c.opts?.cwd).toBe(worktree);
     expect(c.args).not.toContain('-C');
-    // proto invocation with approval policy flag first
-    expect(c.args[0]).toBe('-a=never');
-    expect(c.args[1]).toBe('proto');
+    // proto invocation uses -c overrides only; ensure 'proto' present and -c used
+    expect(c.args).toContain('proto');
+    expect(c.args.some((a: any) => a === '-c')).toBe(true);
   });
 });

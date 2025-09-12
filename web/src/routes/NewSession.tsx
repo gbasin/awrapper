@@ -34,6 +34,8 @@ export default function NewSession() {
   const [sandboxMode, setSandboxMode] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('workspace-write')
   const [includePlanTool, setIncludePlanTool] = useState<boolean>(true)
   const [webSearch, setWebSearch] = useState<boolean>(true)
+  const [includeApplyPatchTool, setIncludeApplyPatchTool] = useState<boolean>(true)
+  const [includeViewImageTool, setIncludeViewImageTool] = useState<boolean>(true)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
@@ -45,6 +47,8 @@ export default function NewSession() {
           if (c.sandbox_mode_default && ['read-only','workspace-write','danger-full-access'].includes(c.sandbox_mode_default)) setSandboxMode(c.sandbox_mode_default as any)
           if (typeof c.include_plan_tool_default === 'boolean') setIncludePlanTool(c.include_plan_tool_default)
           if (typeof c.web_search_default === 'boolean') setWebSearch(c.web_search_default)
+          if (typeof c.include_apply_patch_tool_default === 'boolean') setIncludeApplyPatchTool(c.include_apply_patch_tool_default)
+          if (typeof c.include_view_image_tool_default === 'boolean') setIncludeViewImageTool(c.include_view_image_tool_default)
         }).catch(() => {})
       }
     } catch {}
@@ -135,6 +139,14 @@ export default function NewSession() {
               <Switch checked={webSearch} onCheckedChange={setWebSearch} />
               <span>Web search</span>
             </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={includeApplyPatchTool} onCheckedChange={setIncludeApplyPatchTool} />
+              <span>Apply patch tool</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={includeViewImageTool} onCheckedChange={setIncludeViewImageTool} />
+              <span>View image tool</span>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col min-h-0">
@@ -166,6 +178,8 @@ export default function NewSession() {
                     sandbox_mode: sandboxMode,
                     include_plan_tool: includePlanTool,
                     web_search: webSearch,
+                    include_apply_patch_tool: includeApplyPatchTool,
+                    include_view_image_tool: includeViewImageTool,
                   })
                 }}
               >

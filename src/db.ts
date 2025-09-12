@@ -46,6 +46,8 @@ function migrate(db: Database.Database) {
       sandbox_mode text,
       include_plan_tool integer,
       web_search integer,
+      include_apply_patch_tool integer,
+      include_view_image_tool integer,
       foreign key(agent_id) references agents(id)
     );
 
@@ -92,12 +94,14 @@ function migrate(db: Database.Database) {
           sandbox_mode text,
           include_plan_tool integer,
           web_search integer,
+          include_apply_patch_tool integer,
+          include_view_image_tool integer,
           foreign key(agent_id) references agents(id)
         );
       `);
       db.exec(`
-        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, block_while_running, model, approval_policy, sandbox_mode, include_plan_tool, web_search)
-        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, 1, NULL, NULL, NULL, NULL, NULL
+        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, block_while_running, model, approval_policy, sandbox_mode, include_plan_tool, web_search, include_apply_patch_tool, include_view_image_tool)
+        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL
         from sessions;
       `);
       db.exec('drop table sessions');
@@ -118,6 +122,8 @@ function migrate(db: Database.Database) {
     ensureCol('sandbox_mode', 'sandbox_mode text');
     ensureCol('include_plan_tool', 'include_plan_tool integer');
     ensureCol('web_search', 'web_search integer');
+    ensureCol('include_apply_patch_tool', 'include_apply_patch_tool integer');
+    ensureCol('include_view_image_tool', 'include_view_image_tool integer');
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch {}
     // swallow; best-effort migration
@@ -150,6 +156,14 @@ export type Session = {
   agent_log_hint?: string | null;
   artifact_dir?: string | null;
   block_while_running?: 0 | 1;
+  // session settings
+  model?: string | null;
+  approval_policy?: string | null;
+  sandbox_mode?: string | null;
+  include_plan_tool?: 0 | 1;
+  web_search?: 0 | 1;
+  include_apply_patch_tool?: 0 | 1;
+  include_view_image_tool?: 0 | 1;
 };
 
 export type Message = {

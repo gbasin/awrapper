@@ -15,6 +15,8 @@ export type Session = {
   sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access' | string | null
   include_plan_tool?: 0 | 1
   web_search?: 0 | 1
+  include_apply_patch_tool?: 0 | 1
+  include_view_image_tool?: 0 | 1
 }
 
 export type Message = {
@@ -35,8 +37,8 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listSessions: () => json<Session[]>('/sessions'),
   getSession: (id: string) => json<Session>(`/sessions/${id}`),
-  getConfig: () => json<{ default_use_worktree: boolean; enable_commit?: boolean; enable_promote?: boolean; model_default?: string; approval_policy_default?: string; sandbox_mode_default?: string; include_plan_tool_default?: boolean; web_search_default?: boolean }>('/config'),
-  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean; block_while_running?: boolean; model?: string; approval_policy?: 'never' | 'on-request' | 'on-failure' | 'untrusted'; sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; include_plan_tool?: boolean; web_search?: boolean }) => {
+  getConfig: () => json<{ default_use_worktree: boolean; enable_commit?: boolean; enable_promote?: boolean; model_default?: string; approval_policy_default?: string; sandbox_mode_default?: string; include_plan_tool_default?: boolean; web_search_default?: boolean; include_apply_patch_tool_default?: boolean; include_view_image_tool_default?: boolean }>('/config'),
+  createSession: async (body: { repo_path: string; branch?: string; initial_message?: string; use_worktree?: boolean; block_while_running?: boolean; model?: string; approval_policy?: 'never' | 'on-request' | 'on-failure' | 'untrusted'; sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access'; include_plan_tool?: boolean; web_search?: boolean; include_apply_patch_tool?: boolean; include_view_image_tool?: boolean }) => {
     const res = await fetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
