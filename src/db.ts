@@ -41,6 +41,11 @@ function migrate(db: Database.Database) {
       agent_log_hint text,
       artifact_dir text,
       block_while_running integer,
+      model text,
+      approval_policy text,
+      sandbox_mode text,
+      include_plan_tool integer,
+      web_search integer,
       foreign key(agent_id) references agents(id)
     );
 
@@ -82,24 +87,37 @@ function migrate(db: Database.Database) {
           agent_log_hint text,
           artifact_dir text,
           block_while_running integer,
+          model text,
+          approval_policy text,
+          sandbox_mode text,
+          include_plan_tool integer,
+          web_search integer,
           foreign key(agent_id) references agents(id)
         );
       `);
       db.exec(`
-        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, block_while_running)
-        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, 1
+        insert into sessions_new (id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, block_while_running, model, approval_policy, sandbox_mode, include_plan_tool, web_search)
+        select id, agent_id, repo_path, branch, worktree_path, status, pid, started_at, last_activity_at, closed_at, exit_code, log_path, error_message, agent_log_hint, artifact_dir, 1, NULL, NULL, NULL, NULL, NULL
         from sessions;
       `);
       db.exec('drop table sessions');
       db.exec('alter table sessions_new rename to sessions');
       db.exec('COMMIT');
     }
-    // Add block_while_running if missing
-    const hasBlock = cols.some((c) => c.name === 'block_while_running');
-    if (!hasBlock) {
-      db.exec('ALTER TABLE sessions ADD COLUMN block_while_running integer');
-      db.exec('UPDATE sessions SET block_while_running = 1 WHERE block_while_running IS NULL');
-    }
+    // Add newly introduced columns if missing
+    const ensureCol = (name: string, ddl: string, fill?: string) => {
+      const exists = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).some((c) => c.name === name);
+      if (!exists) {
+        db.exec(`ALTER TABLE sessions ADD COLUMN ${ddl}`);
+        if (fill) db.exec(fill);
+      }
+    };
+    ensureCol('block_while_running', 'block_while_running integer', 'UPDATE sessions SET block_while_running = 1 WHERE block_while_running IS NULL');
+    ensureCol('model', 'model text');
+    ensureCol('approval_policy', 'approval_policy text');
+    ensureCol('sandbox_mode', 'sandbox_mode text');
+    ensureCol('include_plan_tool', 'include_plan_tool integer');
+    ensureCol('web_search', 'web_search integer');
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch {}
     // swallow; best-effort migration

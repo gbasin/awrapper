@@ -9,6 +9,7 @@ import { Button } from '../components/ui/button'
 import { BrowseDialog } from './BrowseDialog'
 import { toast } from 'sonner'
 import { Switch } from '../components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 
 export default function NewSession() {
   const qc = useQueryClient()
@@ -27,11 +28,24 @@ export default function NewSession() {
     } catch { return true }
   })
   const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
+  // Session settings
+  const [model, setModel] = useState<string>('')
+  const [approvalPolicy, setApprovalPolicy] = useState<'never' | 'on-request' | 'on-failure' | 'untrusted'>('never')
+  const [sandboxMode, setSandboxMode] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>('workspace-write')
+  const [includePlanTool, setIncludePlanTool] = useState<boolean>(true)
+  const [webSearch, setWebSearch] = useState<boolean>(true)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
       if (raw == null) {
-        api.getConfig().then((c) => setUseWorktree(!!c.default_use_worktree)).catch(() => {})
+        api.getConfig().then((c) => {
+          setUseWorktree(!!c.default_use_worktree)
+          if (c.model_default) setModel(c.model_default)
+          if (c.approval_policy_default && ['never','on-request','on-failure','untrusted'].includes(c.approval_policy_default)) setApprovalPolicy(c.approval_policy_default as any)
+          if (c.sandbox_mode_default && ['read-only','workspace-write','danger-full-access'].includes(c.sandbox_mode_default)) setSandboxMode(c.sandbox_mode_default as any)
+          if (typeof c.include_plan_tool_default === 'boolean') setIncludePlanTool(c.include_plan_tool_default)
+          if (typeof c.web_search_default === 'boolean') setWebSearch(c.web_search_default)
+        }).catch(() => {})
       }
     } catch {}
   }, [])
@@ -84,6 +98,43 @@ export default function NewSession() {
               <Switch checked={blockWhileRunning} onCheckedChange={setBlockWhileRunning} />
               <span title="When on, the UI disables Send while a turn is running.">Block while running</span>
             </div>
+            <Input
+              placeholder="model (e.g., gpt-5-high)"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="sm:col-span-2 md:col-span-3"
+            />
+            <div className="flex items-center gap-2">
+              <span className="text-sm w-28">Approval</span>
+              <Select value={approvalPolicy} onValueChange={(v) => setApprovalPolicy(v as any)}>
+                <SelectTrigger className="w-[220px]"><SelectValue placeholder="never" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="never">never</SelectItem>
+                  <SelectItem value="on-request">on-request</SelectItem>
+                  <SelectItem value="on-failure">on-failure</SelectItem>
+                  <SelectItem value="untrusted">untrusted</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm w-28">Sandbox</span>
+              <Select value={sandboxMode} onValueChange={(v) => setSandboxMode(v as any)}>
+                <SelectTrigger className="w-[220px]"><SelectValue placeholder="workspace-write" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="read-only">read-only</SelectItem>
+                  <SelectItem value="workspace-write">workspace-write</SelectItem>
+                  <SelectItem value="danger-full-access">danger-full-access</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={includePlanTool} onCheckedChange={setIncludePlanTool} />
+              <span>Plan tool</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={webSearch} onCheckedChange={setWebSearch} />
+              <span>Web search</span>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col min-h-0">
@@ -104,7 +155,18 @@ export default function NewSession() {
                 onSubmit={(e) => {
                   e.preventDefault()
                   if (!repo.trim()) return
-                  m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree, block_while_running: blockWhileRunning })
+                  m.mutate({
+                    repo_path: repo,
+                    branch: branch || undefined,
+                    initial_message: initial || undefined,
+                    use_worktree: useWorktree,
+                    block_while_running: blockWhileRunning,
+                    model: model || undefined,
+                    approval_policy: approvalPolicy,
+                    sandbox_mode: sandboxMode,
+                    include_plan_tool: includePlanTool,
+                    web_search: webSearch,
+                  })
                 }}
               >
                 <Button type="submit" disabled={m.isPending}>{m.isPending ? 'Creating…' : 'Create session'}</Button>

@@ -62,3 +62,28 @@ export async function ensureDataDirs() {
   await fs.ensureDir(LOGS_DIR);
   await fs.ensureDir(ARTIFACTS_DIR);
 }
+
+// Session defaults (can be overridden per-session via POST /sessions)
+function parseBoolEnv(v: string | undefined, fallback: boolean) {
+  if (v == null) return fallback;
+  const s = String(v).trim().toLowerCase();
+  if (s === '1' || s === 'true' || s === 'yes' || s === 'on') return true;
+  if (s === '0' || s === 'false' || s === 'no' || s === 'off') return false;
+  return fallback;
+}
+
+export const DEFAULT_MODEL = process.env.AWRAPPER_MODEL_DEFAULT || 'gpt-5-high';
+export const DEFAULT_APPROVAL_POLICY = (process.env.AWRAPPER_APPROVAL_POLICY_DEFAULT || 'never') as
+  | 'untrusted'
+  | 'on-failure'
+  | 'on-request'
+  | 'never';
+export const DEFAULT_SANDBOX_MODE = (process.env.AWRAPPER_SANDBOX_MODE_DEFAULT || 'workspace-write') as
+  | 'read-only'
+  | 'workspace-write'
+  | 'danger-full-access';
+export const DEFAULT_INCLUDE_PLAN_TOOL = parseBoolEnv(process.env.AWRAPPER_INCLUDE_PLAN_DEFAULT, true);
+export const DEFAULT_WEB_SEARCH = parseBoolEnv(process.env.AWRAPPER_WEB_SEARCH_DEFAULT, true);
+// Always keep these tools on by default; expose overrides later if needed
+export const DEFAULT_INCLUDE_APPLY_PATCH_TOOL = parseBoolEnv(process.env.AWRAPPER_INCLUDE_APPLY_PATCH_DEFAULT, true);
+export const DEFAULT_INCLUDE_VIEW_IMAGE_TOOL = parseBoolEnv(process.env.AWRAPPER_INCLUDE_VIEW_IMAGE_DEFAULT, true);

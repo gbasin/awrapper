@@ -18,26 +18,41 @@ export async function setupPaths(id: string) {
 }
 
 export async function spawnPersistentCodex({
-  worktree
+  worktree,
+  options,
 }: {
   worktree: string;
+  options?: {
+    model?: string;
+    approval_policy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+    sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+    include_plan_tool?: boolean;
+    web_search?: boolean;
+    include_apply_patch_tool?: boolean;
+    include_view_image_tool?: boolean;
+  };
 }): Promise<SpawnResult> {
   const id = path.basename(worktree);
   const { logPath, artifactDir } = await setupPaths(id);
 
   // NOTE: Protocol specifics TBD; we currently just start the process and pipe logs.
   const codexBin = process.env.CODEX_BIN || 'codex';
-  // Spawn proto with config overrides to enable plan tool and align policies.
-  // Note: proto subcommand only respects -c overrides (not -a/--sandbox flags).
-  const args = [
-    // Enable the plan tool so the agent can call update_plan in persistent sessions
-    '-c', 'include_plan_tool=true',
-    // Prefer never approvals; awrapper handles approvals externally
-    '-c', 'approval_policy="never"',
-    // Allow workspace writes by default so apply_patch and edits work
-    '-c', 'sandbox_mode="workspace-write"',
-    'proto'
-  ];
+  // Build proto spawn args using -c overrides only.
+  const args: string[] = [];
+  const add = (k: string, v: string | boolean | undefined) => {
+    if (v === undefined) return;
+    const val = typeof v === 'boolean' ? String(v) : v;
+    args.push('-c');
+    args.push(`${k}=${/\s|"/.test(String(val)) ? JSON.stringify(val) : String(val)}`);
+  };
+  add('model', options?.model);
+  add('approval_policy', options?.approval_policy);
+  add('sandbox_mode', options?.sandbox_mode);
+  add('include_plan_tool', options?.include_plan_tool ?? true);
+  add('include_apply_patch_tool', options?.include_apply_patch_tool ?? true);
+  add('include_view_image_tool', options?.include_view_image_tool ?? true);
+  add('tools.web_search', options?.web_search ?? true);
+  args.push('proto');
   const proc = execa(codexBin, args, { all: true, cwd: worktree });
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);

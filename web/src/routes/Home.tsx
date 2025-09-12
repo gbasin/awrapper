@@ -33,12 +33,15 @@ export default function Home() {
     } catch { return true }
   })
   const [blockWhileRunning, setBlockWhileRunning] = useState<boolean>(true)
+  // Minimal: read defaults so we can include them even if not shown
+  const [cfg, setCfg] = useState<{ model_default?: string; approval_policy_default?: string; sandbox_mode_default?: string; include_plan_tool_default?: boolean; web_search_default?: boolean } | null>(null)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('awrapper:useWorktree')
       if (raw == null) {
         api.getConfig().then((c) => {
           setUseWorktree(!!c.default_use_worktree)
+          setCfg(c)
         }).catch(() => {})
       }
     } catch {}
@@ -80,7 +83,18 @@ export default function Home() {
             className="grid gap-2 sm:grid-cols-2 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault()
-              m.mutate({ repo_path: repo, branch: branch || undefined, initial_message: initial || undefined, use_worktree: useWorktree, block_while_running: blockWhileRunning })
+              m.mutate({
+                repo_path: repo,
+                branch: branch || undefined,
+                initial_message: initial || undefined,
+                use_worktree: useWorktree,
+                block_while_running: blockWhileRunning,
+                model: cfg?.model_default,
+                approval_policy: (cfg?.approval_policy_default as any) || 'never',
+                sandbox_mode: (cfg?.sandbox_mode_default as any) || 'workspace-write',
+                include_plan_tool: cfg?.include_plan_tool_default ?? true,
+                web_search: cfg?.web_search_default ?? true,
+              })
             }}
           >
             <div className="flex items-center gap-2">

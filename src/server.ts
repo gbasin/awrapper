@@ -96,8 +96,17 @@ export async function buildServer(opts?: { listen?: boolean }) {
   // Directory browsing API for server-side picker
   // Also surface minimal runtime config for the SPA
   app.get('/config', async (_req, reply) => {
-    const { ENABLE_GIT_COMMIT, ENABLE_PROMOTE } = await import('./config.js');
-    reply.send({ default_use_worktree: DEFAULT_USE_WORKTREE, enable_commit: ENABLE_GIT_COMMIT, enable_promote: ENABLE_PROMOTE });
+    const { ENABLE_GIT_COMMIT, ENABLE_PROMOTE, DEFAULT_MODEL, DEFAULT_APPROVAL_POLICY, DEFAULT_SANDBOX_MODE, DEFAULT_INCLUDE_PLAN_TOOL, DEFAULT_WEB_SEARCH } = await import('./config.js');
+    reply.send({
+      default_use_worktree: DEFAULT_USE_WORKTREE,
+      enable_commit: ENABLE_GIT_COMMIT,
+      enable_promote: ENABLE_PROMOTE,
+      model_default: DEFAULT_MODEL,
+      approval_policy_default: DEFAULT_APPROVAL_POLICY,
+      sandbox_mode_default: DEFAULT_SANDBOX_MODE,
+      include_plan_tool_default: DEFAULT_INCLUDE_PLAN_TOOL,
+      web_search_default: DEFAULT_WEB_SEARCH,
+    });
   });
 
   // Directory browsing API for server-side picker
@@ -161,7 +170,13 @@ export async function buildServer(opts?: { listen?: boolean }) {
     const use_worktree = typeof body.use_worktree === 'boolean' ? body.use_worktree : DEFAULT_USE_WORKTREE;
     const initial_message = body.initial_message as string | undefined;
     const block_while_running = typeof body.block_while_running === 'boolean' ? !!body.block_while_running : true;
-    app.log.info({ agent_id, repo_path, branch, use_worktree, block_while_running, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
+    // Optional session settings
+    const model = (body.model as string | undefined)?.trim();
+    const approval_policy = (body.approval_policy as string | undefined)?.trim() as any;
+    const sandbox_mode = (body.sandbox_mode as string | undefined)?.trim() as any;
+    const include_plan_tool = typeof body.include_plan_tool === 'boolean' ? !!body.include_plan_tool : undefined;
+    const web_search = typeof body.web_search === 'boolean' ? !!body.web_search : undefined;
+    app.log.info({ agent_id, repo_path, branch, use_worktree, block_while_running, model, approval_policy, sandbox_mode, include_plan_tool, web_search, has_initial: !!(initial_message && String(initial_message).trim()) }, 'Create session request');
     if (agent_id !== 'codex') return reply.code(400).send({ error: 'Unsupported agent' });
     // Validate repo path
     try {
@@ -186,14 +201,36 @@ export async function buildServer(opts?: { listen?: boolean }) {
 
     const { logPath, artifactDir } = await (await import('./sessionProc.js')).setupPaths(id);
     const now = Date.now();
+    // Resolve defaults
+    const {
+      DEFAULT_MODEL,
+      DEFAULT_APPROVAL_POLICY,
+      DEFAULT_SANDBOX_MODE,
+      DEFAULT_INCLUDE_PLAN_TOOL,
+      DEFAULT_WEB_SEARCH,
+    } = await import('./config.js');
+    const eff_model = model || DEFAULT_MODEL;
+    const eff_approval = (approval_policy || DEFAULT_APPROVAL_POLICY) as string;
+    const eff_sandbox = (sandbox_mode || DEFAULT_SANDBOX_MODE) as string;
+    const eff_plan = include_plan_tool == null ? (DEFAULT_INCLUDE_PLAN_TOOL ? 1 : 0) : (include_plan_tool ? 1 : 0);
+    const eff_web = web_search == null ? (DEFAULT_WEB_SEARCH ? 1 : 0) : (web_search ? 1 : 0);
+
     db.prepare(
-      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, status, started_at, log_path, agent_log_hint, artifact_dir, block_while_running)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir, block_while_running ? 1 : 0);
+      `insert into sessions (id, agent_id, repo_path, branch, worktree_path, status, started_at, log_path, agent_log_hint, artifact_dir, block_while_running, model, approval_policy, sandbox_mode, include_plan_tool, web_search)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, agent_id, repo_path, branch || null, worktree_path, 'queued', now, logPath, '~/.codex/log/codex-tui.log', artifactDir, block_while_running ? 1 : 0, eff_model, eff_approval, eff_sandbox, eff_plan, eff_web);
 
     try {
       db.prepare('update sessions set status = ? where id = ?').run('starting', id);
-      const { proc } = await spawnPersistentCodex({ worktree: worktree_path });
+      const { proc } = await spawnPersistentCodex({ worktree: worktree_path, options: {
+        model: eff_model,
+        approval_policy: eff_approval as any,
+        sandbox_mode: eff_sandbox as any,
+        include_plan_tool: !!eff_plan,
+        web_search: !!eff_web,
+        include_apply_patch_tool: true,
+        include_view_image_tool: true,
+      }});
       db.prepare('update sessions set status = ?, pid = ? where id = ?').run('running', proc!.pid, id);
       procs.set(id, proc!);
       // Attach proto session handler
