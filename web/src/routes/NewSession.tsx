@@ -9,7 +9,7 @@ import { Button } from '../components/ui/button'
 import { BrowseDialog } from './BrowseDialog'
 import { toast } from 'sonner'
 import { Switch } from '../components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Select } from '../components/ui/select'
 
 export default function NewSession() {
   const qc = useQueryClient()
@@ -110,25 +110,27 @@ export default function NewSession() {
             />
             <div className="flex items-center gap-2">
               <span className="text-sm w-28">Approval</span>
-              <Select value={approvalPolicy} onValueChange={(v) => setApprovalPolicy(v as any)}>
-                <SelectTrigger className="w-[220px]"><SelectValue placeholder="never" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="never">never</SelectItem>
-                  <SelectItem value="on-request">on-request</SelectItem>
-                  <SelectItem value="on-failure">on-failure</SelectItem>
-                  <SelectItem value="untrusted">untrusted</SelectItem>
-                </SelectContent>
+              <Select
+                className="w-[220px]"
+                value={approvalPolicy}
+                onChange={(e) => setApprovalPolicy(e.target.value as any)}
+              >
+                <option value="never">never</option>
+                <option value="on-request">on-request</option>
+                <option value="on-failure">on-failure</option>
+                <option value="untrusted">untrusted</option>
               </Select>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm w-28">Sandbox</span>
-              <Select value={sandboxMode} onValueChange={(v) => setSandboxMode(v as any)}>
-                <SelectTrigger className="w-[220px]"><SelectValue placeholder="workspace-write" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="read-only">read-only</SelectItem>
-                  <SelectItem value="workspace-write">workspace-write</SelectItem>
-                  <SelectItem value="danger-full-access">danger-full-access</SelectItem>
-                </SelectContent>
+              <Select
+                className="w-[220px]"
+                value={sandboxMode}
+                onChange={(e) => setSandboxMode(e.target.value as any)}
+              >
+                <option value="read-only">read-only</option>
+                <option value="workspace-write">workspace-write</option>
+                <option value="danger-full-access">danger-full-access</option>
               </Select>
             </div>
             <div className="flex items-center gap-2">
