@@ -27,7 +27,17 @@ export async function spawnPersistentCodex({
 
   // NOTE: Protocol specifics TBD; we currently just start the process and pipe logs.
   const codexBin = process.env.CODEX_BIN || 'codex';
-  const args = ['-a=never', 'proto'];
+  // Spawn proto with config overrides to enable plan tool and align policies.
+  // Note: proto subcommand only respects -c overrides (not -a/--sandbox flags).
+  const args = [
+    // Enable the plan tool so the agent can call update_plan in persistent sessions
+    '-c', 'include_plan_tool=true',
+    // Prefer never approvals; awrapper handles approvals externally
+    '-c', 'approval_policy="never"',
+    // Allow workspace writes by default so apply_patch and edits work
+    '-c', 'sandbox_mode="workspace-write"',
+    'proto'
+  ];
   const proc = execa(codexBin, args, { all: true, cwd: worktree });
   const logStream = fs.createWriteStream(logPath, { flags: 'a' });
   proc.all?.pipe(logStream);
